@@ -1,0 +1,24 @@
+= Demo for setting up a Confluent Cloud dedicated cluster with Private Link for Schema Registry
+
+This demonstrates how to set up a Confluent Cloud dedicated cluster with Private Link
+
+DISCLAIMER: This project is for demonstration purposes only. Using the demo unmodified in production is highly discouraged. Use at your own risk.
+
+## Precondition
+
+You need the following to run this demo:
+
+* A Confluent Cloud Organization.
+* A Confluent Cloud API Key with sufficient access permissions to set up a dedicated cluster and an identity provider including identity pools
+* Optionally, this demo can generate a certificate authority (CA) and client certificates in PEM as well as JKS format. For the conversion from PEM to JKS, both `openssl` as well as `keytool` need to be installed and in the PATH.
+
+## Getting started
+
+
+== Wrapping things up
+
+You can destroy all created resources including the cluster in Confluent Cloud by running the following command:
+
+```shell
+terraform destroy
+```

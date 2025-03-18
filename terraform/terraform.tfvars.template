@@ -1,0 +1,7 @@
+#tf_last_updated = "2024-07-16T18:26:59+00:00"
+ccloud_cluster_generate_client_config_files = true
+#ccloud_cluster_region = ""
+ccloud_environment_name = "my-test-env"
+ccloud_cluster_name = "my-test-cluster"
+vpc_id = "THE VPC ID"
+aws_account_id = "THE ACCOUNT ID"
