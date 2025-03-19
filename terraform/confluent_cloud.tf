@@ -62,7 +62,7 @@ resource "confluent_network" "aws-private-link" {
   #  data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1c.availability_zone_id,
   #  
   #]
-  zones = [for name, zone in data.aws_availability_zone.vpc_availability_zone : name]
+  #zones = [for index, zone in data.aws_availability_zone.vpc_availability_zone : zone.id]
   environment {
     id = confluent_environment.example_env.id
   }
@@ -89,44 +89,70 @@ resource "confluent_private_link_access" "aws" {
   }
 }
 
-# resource "aws_vpc_endpoint" "platt" {
-#   vpc_id            = var.vpc_id
-#   service_name      = var.ptfe_service
-#   vpc_endpoint_type = "Interface"
-
-#   security_group_ids = [
-#     aws_security_group.ptfe_service.id,
-#   ]
-
-#   subnet_ids          = [local.subnet_ids]
-#   private_dns_enabled = false
-# }
-
-resource "confluent_private_link_attachment" "platt-aws" {
+# Create a private link attachment in Confluent Cloud
+resource "confluent_private_link_attachment" "private_link_attachment" {
   cloud = "AWS"
   region = var.aws_region
-  display_name = "${local.resource_prefix}_platt"
+  display_name = "${local.resource_prefix}_aws_private_link_attachment"
   environment {
     id = confluent_environment.example_env.id
   }
 }
 
+resource "aws_security_group" "private_link_endpoint_sg" {
+  name        = "${local.resource_prefix}_aws_private_link_endpoint_sg"
+  vpc_id      = data.aws_vpc.vpc.id
+
+#   ingress {
+#     # TLS (change to whatever ports you need)
+#     from_port   = 443
+#     to_port     = 443
+#     protocol    = "tcp"
+#     # Please restrict your ingress to only necessary IPs and ports.
+#     # Opening to 0.0.0.0/0 can lead to security vulnerabilities.
+#     cidr_blocks = # add a CIDR block here
+#   }
+
+  egress {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    cidr_blocks     = ["0.0.0.0/0"]
+  }
+}
+
+# Set up a private endpoint in AWS
+resource "aws_vpc_endpoint" "private_endpoint" {
+  vpc_id            = var.vpc_id
+  service_name      =  confluent_private_link_attachment.private_link_attachment.aws[0].vpc_endpoint_service_name
+  vpc_endpoint_type = "Interface"
+
+  security_group_ids = [
+    aws_security_group.private_link_endpoint_sg.id,
+  ]
+
+  subnet_ids          = data.aws_subnets.vpc_subnets.ids
+  # Only for AWS and AWS Marketplace partner services. We configure our own hosted zone instead
+  private_dns_enabled = false
+}
+
+# Set up a private link connection in Confluent Cloud, which connects the private endpoint to the private link attachment
 resource "confluent_private_link_attachment_connection" "aws" {
   display_name ="${local.resource_prefix}_platt"
   environment {
     id = confluent_environment.example_env.id
   }
   aws {
-    vpc_endpoint_id = "vpce-0ed4d51f5d6ef9b6d"
+    vpc_endpoint_id = aws_vpc_endpoint.private_endpoint.id
   }
   private_link_attachment {
-    id = "platt-aws"
+    id = confluent_private_link_attachment.private_link_attachment.id
   }
 }
 
-output "private_link_attachment_connection" {
-  value = confluent_private_link_attachment_connection.aws
-}
+#output "private_link_attachment_connection" {
+#  value = confluent_private_link_attachment_connection
+#}
 
 # Topic with configured name
 resource "confluent_kafka_topic" "example_aws_private_link_topic_test" {

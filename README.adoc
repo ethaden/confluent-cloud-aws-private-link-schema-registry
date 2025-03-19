@@ -4,7 +4,7 @@ This demonstrates how to set up a Confluent Cloud dedicated cluster with Private
 
 DISCLAIMER: This project is for demonstration purposes only. Using the demo unmodified in production is highly discouraged. Use at your own risk.
 
-## Precondition
+== Precondition
 
 You need the following to run this demo:
 
@@ -12,7 +12,52 @@ You need the following to run this demo:
 * A Confluent Cloud API Key with sufficient access permissions to set up a dedicated cluster and an identity provider including identity pools
 * Optionally, this demo can generate a certificate authority (CA) and client certificates in PEM as well as JKS format. For the conversion from PEM to JKS, both `openssl` as well as `keytool` need to be installed and in the PATH.
 
-## Getting started
+== Getting started
+
+Set `CONFLUENT_CLOUD_API_KEY` and `CONFLUENT_CLOUD_API_SECRET` or just drop the `api-key.txt` downloaded from Confluent Cloud UI to the terraform folder. Copy the `terraform.tfvars.template` to `terraform.tfvars` and customize the values.
+
+Then run terraform:
+
+```shell
+terraform init
+terraform apply
+```
+
+== Using the setup
+
+The demo sets up a dedicated cluster with private networking. In order to access it, you need to run your producers and consumers in the VPC used to set things up (where you have private link configured).
+
+The final step of the setup will have printed some config vaules. You can print them again by running:
+
+```shell
+terraform output
+```
+
+Let's set some environment variables for convenience:
+
+```shell
+export KAFKA_BOOTSTRAP_SERVER=$(terraform output --raw cluster_bootstrap_server)
+export KAFKA_CLUSTER_REST=$(terraform output --raw cluster_rest_endpoint)
+```
+
+
+List the topics:
+
+```shell
+kafka-topics --bootstrap-server ${KAFKA_BOOTSTRAP_SERVER} --command-config generated/client-admin.conf --list
+```
+
+Produce to the existing topic (stop producing events with `Ctrl-D`):
+
+```shell
+kafka-console-producer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVER} --producer.config generated/client-producer.conf --topic test
+```
+
+Consume what we have just written (stop consuming events with `Ctrl-C`):
+
+```shell
+kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVER} --consumer.config generated/client-consumer.conf --topic test --from-beginning
+```
 
 
 == Wrapping things up

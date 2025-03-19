@@ -22,14 +22,14 @@ data "aws_subnet" "vpc_subnet" {
 }
 
 # This will create a map from 0, 1, 2, ... to all availability zone objects
-data "aws_availability_zone" "vpc_availability_zone" {
+data "aws_availability_zone" "vpc_subnet_to_availability_zone" {
   #for_each = { for index, subnetid in data.aws_subnets.vpc_subnets.ids : index => data.aws_subnet.vpc_subnet[index].availability_zone_id }
   for_each = { for index, subnetid in data.aws_subnets.vpc_subnets.ids : index => data.aws_subnet.vpc_subnet[index].availability_zone }
   name       = each.value
 }
 
-data "aws_availability_zone" "vpc_id_to_availability_zone" {
-  for_each = { for index, availability_zone in data.aws_availability_zone.vpc_availability_zone : availability_zone.name => availability_zone.name}
+data "aws_availability_zone" "vpc_availability_zone_name_to_zone" {
+  for_each = { for index, availability_zone in data.aws_availability_zone.vpc_subnet_to_availability_zone : availability_zone.name => availability_zone.name}
   name       = each.value
 }
 
@@ -99,6 +99,7 @@ resource "aws_vpc_endpoint" "privatelink" {
   ]
 }
 
+# DNS for the private link connection to the dedicated cluster
 resource "aws_route53_zone" "privatelink" {
   name = local.dns_domain
 
@@ -122,13 +123,8 @@ locals {
 }
 
 resource "aws_route53_record" "privatelink-zonal" {
-  #for_each = var.subnets_to_privatelink
-  #for_each = {
-  #  "${data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1a.availability_zone_id}" = data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1a.availability_zone,
-  #  "${data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1b.availability_zone_id}" = data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1b.availability_zone,
-  #  "${data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1c.availability_zone_id}" = data.terraform_remote_state.common_vpc.outputs.subnet_dualstack_1c.availability_zone,
-  #}
-  for_each = data.aws_availability_zone.vpc_id_to_availability_zone
+  # Note: We need the real ID of the availability zone here (e.g. euw1-az1), NOT the name as seen by the VPC (which is different)
+  for_each = { for index, subnet in data.aws_subnet.vpc_subnet: subnet.availability_zone_id => subnet.availability_zone }
 
   zone_id = aws_route53_zone.privatelink.zone_id
   #name    = length(var.subnets_to_privatelink) == 1 ? "*" : "*.${each.key}"
@@ -141,6 +137,26 @@ resource "aws_route53_record" "privatelink-zonal" {
       each.value,
       replace(aws_vpc_endpoint.privatelink.dns_entry[0]["dns_name"], local.endpoint_prefix, "")
     )
+  ]
+}
+
+# DNS for the private link connection to the serverless products (i.e. schema registry)
+resource "aws_route53_zone" "privatelink_serverless" {
+  name = "${var.aws_region}.aws.private.confluent.cloud"
+
+  vpc {
+    vpc_id = data.aws_vpc.vpc.id
+  }
+}
+
+resource "aws_route53_record" "privatelink_serverless" {
+  zone_id = aws_route53_zone.privatelink_serverless.zone_id
+  name    = "*.${aws_route53_zone.privatelink_serverless.name}"
+  type    = "CNAME"
+  ttl     = "60"
+  records = [
+    #aws_vpc_endpoint.privatelink.dns_entry[0]["dns_name"]
+    aws_vpc_endpoint.private_endpoint.dns_entry[0].dns_name
   ]
 }
 
