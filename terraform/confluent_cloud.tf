@@ -12,6 +12,63 @@ resource "confluent_environment" "example_env" {
   }
 }
 
+data "confluent_schema_registry_cluster" "example_schema_registry" {
+    environment {
+      id = confluent_environment.example_env.id
+    }
+    # Using this dependency avoids a potential race condition where the schema registry is still created while terraform already tries to access it (which will fail)
+    depends_on = [ confluent_kafka_cluster.example_aws_private_link_cluster ]
+}
+
+resource "confluent_service_account" "example_env_admin" {
+  display_name = "${var.resource_prefix}_example_sa_env_admin"
+  description  = "Service Account Example Environment Admin (just for accessing Schema Registry)"
+}
+
+resource "confluent_api_key" "example_schema_registry_admin_api_key" {
+  display_name = "${var.resource_prefix}_schema_registry_admin_api_key"
+  description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_example_sa_env_admin' service account"
+  owner {
+    id          = confluent_service_account.example_env_admin.id
+    api_version = confluent_service_account.example_env_admin.api_version
+    kind        = confluent_service_account.example_env_admin.kind
+  }
+
+  managed_resource {
+    id          = data.confluent_schema_registry_cluster.example_schema_registry.id
+    api_version = data.confluent_schema_registry_cluster.example_schema_registry.api_version
+    kind        = data.confluent_schema_registry_cluster.example_schema_registry.kind
+
+    environment {
+      id = confluent_environment.example_env.id
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+resource "confluent_role_binding" "example_schema_registry_admin_role_binding" {
+  principal   = "User:${confluent_service_account.example_env_admin.id}"
+  role_name   = "ResourceOwner"
+  crn_pattern = "${data.confluent_schema_registry_cluster.example_schema_registry.resource_name}/subject=*"
+}
+
+data "confluent_schema_registry_cluster_config" "example_schema_registry" {
+  schema_registry_cluster {
+    id = data.confluent_schema_registry_cluster.example_schema_registry.id
+  }
+  rest_endpoint = data.confluent_schema_registry_cluster.example_schema_registry.rest_endpoint
+  credentials {
+    key    = confluent_api_key.example_schema_registry_admin_api_key.id
+    secret = confluent_api_key.example_schema_registry_admin_api_key.secret
+  }
+  depends_on = [ confluent_role_binding.example_schema_registry_admin_role_binding ]
+}
+
+
+
 # Confluent Cloud Kafka Cluster
 
 # Set up a basic cluster (or a standard cluster, see below)
@@ -113,6 +170,16 @@ resource "aws_security_group" "private_link_endpoint_sg" {
 #     cidr_blocks = # add a CIDR block here
 #   }
 
+  dynamic "ingress" {
+    for_each = { 1 : 80, 2 : 443, 3 : 9092 }
+    content {
+      protocol         = "tcp"
+      cidr_blocks      = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = ["::/0"]
+      from_port        = ingress.value
+      to_port          = ingress.value
+    }
+  }
   egress {
     from_port       = 0
     to_port         = 0
@@ -166,13 +233,6 @@ resource "confluent_kafka_topic" "example_aws_private_link_topic_test" {
     key    = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.id
     secret = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.secret
   }
-
-  # Required to make sure the role binding is created before trying to create a topic using these credentials
-  depends_on = [ 
-    aws_route53_record.privatelink-zonal, # Need to wait for DNS to be configured as the cluster REST endpoint can only be accessed via private link
-    confluent_role_binding.example_aws_private_link_role_binding_cluster_admin 
-    ]
-
   lifecycle {
     prevent_destroy = false
   }
@@ -207,6 +267,12 @@ resource "confluent_api_key" "example_aws_private_link_api_key_sa_cluster_admin"
   lifecycle {
     prevent_destroy = false
   }
+  # We could run this immediately, but we wait for DNS for the private link and the admin role binding to be configured first.
+  # By waiting here, the setup of all resources using this api key will be delayed until the private link is available
+  depends_on = [ 
+    aws_route53_record.privatelink-zonal, 
+    confluent_role_binding.example_aws_private_link_role_binding_cluster_admin
+    ]
 }
 
 # Assign the CloudClusterAdmin role to the cluster admin service account
@@ -218,6 +284,38 @@ resource "confluent_role_binding" "example_aws_private_link_role_binding_cluster
     prevent_destroy = false
   }
 }
+
+# Schema Registry API Key for the cluster admin (with full access to the environment's schema registry)
+resource "confluent_api_key" "example_schema_registry_cluster_admin_api_key" {
+  display_name = "${var.resource_prefix}_example_api_key_sa_cluster_admin_api_key"
+  description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_example_api_key_sa_cluster_admin' service account"
+  owner {
+    id          = confluent_service_account.example_aws_private_link_sa_cluster_admin.id
+    api_version = confluent_service_account.example_aws_private_link_sa_cluster_admin.api_version
+    kind        = confluent_service_account.example_aws_private_link_sa_cluster_admin.kind
+  }
+
+  managed_resource {
+    id          = data.confluent_schema_registry_cluster.example_schema_registry.id
+    api_version = data.confluent_schema_registry_cluster.example_schema_registry.api_version
+    kind        = data.confluent_schema_registry_cluster.example_schema_registry.kind
+
+    environment {
+      id = confluent_environment.example_env.id
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+resource "confluent_role_binding" "example_schema_registry_cluster_admin_role_binding" {
+  principal   = "User:${confluent_service_account.example_aws_private_link_sa_cluster_admin.id}"
+  role_name   = "ResourceOwner"
+  crn_pattern = "${data.confluent_schema_registry_cluster.example_schema_registry.resource_name}/subject=*"
+}
+
 
 # Service Account, API Key and role bindings for the producer
 resource "confluent_service_account" "example_aws_private_link_sa_producer" {
@@ -260,28 +358,40 @@ resource "confluent_role_binding" "example_aws_private_link_role_binding_produce
     prevent_destroy = false
   }
 }
-resource "confluent_kafka_acl" "example_aws_private_link_acl_producer" {
-  # Instaniciate this block only if the cluster type IS basic
-  count = var.ccloud_cluster_type=="basic" ? 1 : 0
-  kafka_cluster {
-     id = confluent_kafka_cluster.example_aws_private_link_cluster.id
+
+# Schema Registry API Key for the example producer (with prefixed read access to the environment's schema registry)
+resource "confluent_api_key" "example_schema_registry_producer_api_key" {
+  display_name = "${var.resource_prefix}_example_aws_private_link_sa_producer_sr_api_key"
+  description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_example_aws_private_link_sa_producer_sr_api_key' service account"
+  owner {
+    id          = confluent_service_account.example_aws_private_link_sa_producer.id
+    api_version = confluent_service_account.example_aws_private_link_sa_producer.api_version
+    kind        = confluent_service_account.example_aws_private_link_sa_producer.kind
   }
-  rest_endpoint  = confluent_kafka_cluster.example_aws_private_link_cluster.rest_endpoint
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.example_aws_private_link_topic_test.topic_name
-  pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.example_aws_private_link_sa_producer.id}"
-  host          = "*"
-  operation     = "WRITE"
-  permission    = "ALLOW"
-  credentials {
-    key    = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.id
-    secret = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.secret
+
+  managed_resource {
+    id          = data.confluent_schema_registry_cluster.example_schema_registry.id
+    api_version = data.confluent_schema_registry_cluster.example_schema_registry.api_version
+    kind        = data.confluent_schema_registry_cluster.example_schema_registry.kind
+
+    environment {
+      id = confluent_environment.example_env.id
+    }
   }
+
   lifecycle {
     prevent_destroy = false
   }
 }
+
+# In this demo setup, we provide write access to schema registry to the producer. Note: This is not recommended for production environments. Please manage schemas via CI/CD explicitly there.
+resource "confluent_role_binding" "example_schema_registry_producer_role_binding" {
+  for_each = toset(var.ccloud_cluster_producer_write_topic_prefixes)
+  principal   = "User:${confluent_service_account.example_aws_private_link_sa_producer.id}"
+  role_name   = "DeveloperWrite"
+  crn_pattern = "${data.confluent_schema_registry_cluster.example_schema_registry.resource_name}/subject=${each.key}*"
+}
+
 
 # Service Account, API Key and role bindings for the consumer
 resource "confluent_service_account" "example_aws_private_link_sa_consumer" {
@@ -317,71 +427,53 @@ resource "confluent_api_key" "example_aws_private_link_api_key_consumer" {
 # For role bindings such as DeveloperRead and DeveloperWrite at least a standard cluster type would be required. Let's use ACLs instead
 resource "confluent_role_binding" "example_aws_private_link_role_binding_consumer" {
   # Instaniciate this block only if the cluster type is NOT basic
-  count = var.ccloud_cluster_type=="basic" ? 0 : 1
+  for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
   principal   = "User:${confluent_service_account.example_aws_private_link_sa_consumer.id}"
   role_name   = "DeveloperRead"
-  crn_pattern = "${confluent_kafka_cluster.example_aws_private_link_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.example_aws_private_link_cluster.id}/topic=${confluent_kafka_topic.example_aws_private_link_topic_test.topic_name}"
+  crn_pattern = "${confluent_kafka_cluster.example_aws_private_link_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.example_aws_private_link_cluster.id}/topic=${each.value}"
   lifecycle {
     prevent_destroy = false
   }
 }
 resource "confluent_role_binding" "example_aws_private_link_role_binding_consumer_group" {
-  # Instaniciate this block only if the cluster type is NOT basic
-  count = var.ccloud_cluster_type=="basic" ? 0 : 1
+  for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
   principal   = "User:${confluent_service_account.example_aws_private_link_sa_consumer.id}"
   role_name   = "DeveloperRead"
-  crn_pattern = "${confluent_kafka_cluster.example_aws_private_link_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.example_aws_private_link_cluster.id}/group=${var.ccloud_cluster_consumer_group_prefix}*"
+  crn_pattern = "${confluent_kafka_cluster.example_aws_private_link_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.example_aws_private_link_cluster.id}/group=${each.value}*"
   lifecycle {
     prevent_destroy = false
   }
 }
 
-resource "confluent_kafka_acl" "example_aws_private_link_acl_consumer" {
-  # Instaniciate this block only if the cluster type IS basic
-  count = var.ccloud_cluster_type=="basic" ? 1 : 0
+resource "confluent_api_key" "example_schema_registry_consumer_api_key" {
+  display_name = "${var.resource_prefix}_example_api_key_sa_consumer_sr_api_key"
+  description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_example_api_key_sa_cluster_admin' service account"
+  owner {
+    id          = confluent_service_account.example_aws_private_link_sa_consumer.id
+    api_version = confluent_service_account.example_aws_private_link_sa_consumer.api_version
+    kind        = confluent_service_account.example_aws_private_link_sa_consumer.kind
+  }
 
-  kafka_cluster {
-     id = confluent_kafka_cluster.example_aws_private_link_cluster.id
+  managed_resource {
+    id          = data.confluent_schema_registry_cluster.example_schema_registry.id
+    api_version = data.confluent_schema_registry_cluster.example_schema_registry.api_version
+    kind        = data.confluent_schema_registry_cluster.example_schema_registry.kind
+
+    environment {
+      id = confluent_environment.example_env.id
+    }
   }
-  rest_endpoint  = confluent_kafka_cluster.example_aws_private_link_cluster.rest_endpoint
-  resource_type = "TOPIC"
-  resource_name = confluent_kafka_topic.example_aws_private_link_topic_test.topic_name
-  pattern_type  = "LITERAL"
-  principal     = "User:${confluent_service_account.example_aws_private_link_sa_consumer.id}"
-  host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  credentials {
-    key    = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.id
-    secret = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.secret
-  }
+
   lifecycle {
     prevent_destroy = false
   }
 }
 
-resource "confluent_kafka_acl" "example_aws_private_link_acl_consumer_group" {
-  # Instaniciate this block only if the cluster type IS basic
-  count = var.ccloud_cluster_type=="basic" ? 1 : 0
-
-  kafka_cluster {
-    id = confluent_kafka_cluster.example_aws_private_link_cluster.id
-  }
-  rest_endpoint  = confluent_kafka_cluster.example_aws_private_link_cluster.rest_endpoint
-  resource_type = "GROUP"
-  resource_name = var.ccloud_cluster_consumer_group_prefix
-  pattern_type  = "PREFIXED"
-  principal     = "User:${confluent_service_account.example_aws_private_link_sa_consumer.id}"
-  host          = "*"
-  operation     = "READ"
-  permission    = "ALLOW"
-  credentials {
-    key    = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.id
-    secret = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin.secret
-  }
-  lifecycle {
-    prevent_destroy = false
-  }
+resource "confluent_role_binding" "example_schema_registry_consumer_role_binding" {
+  for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
+  principal   = "User:${confluent_service_account.example_aws_private_link_sa_consumer.id}"
+  role_name   = "DeveloperRead"
+  crn_pattern = "${data.confluent_schema_registry_cluster.example_schema_registry.resource_name}/subject=${each.key}*"
 }
 
 output "cluster_bootstrap_server" {
@@ -410,18 +502,20 @@ output "cluster_rest_endpoint" {
 resource "local_sensitive_file" "client_config_files" {
   # Do not generate any files if var.ccloud_cluster_generate_client_config_files is false
   for_each = var.ccloud_cluster_generate_client_config_files ? {
-    "admin" = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin,
-    "producer" = confluent_api_key.example_aws_private_link_api_key_producer,
-    "consumer" = confluent_api_key.example_aws_private_link_api_key_consumer} : {}
+    "admin" = { "cluster_api_key" = confluent_api_key.example_aws_private_link_api_key_sa_cluster_admin, "sr_api_key" = confluent_api_key.example_schema_registry_cluster_admin_api_key},
+    "producer" = { "cluster_api_key" = confluent_api_key.example_aws_private_link_api_key_producer, "sr_api_key" = confluent_api_key.example_schema_registry_producer_api_key},
+    "consumer" = { "cluster_api_key" = confluent_api_key.example_aws_private_link_api_key_consumer, "sr_api_key" = confluent_api_key.example_schema_registry_consumer_api_key}} : {}
 
   content = templatefile("${path.module}/templates/client.conf.tpl",
   {
     client_name = "${each.key}"
     cluster_bootstrap_server = trimprefix("${confluent_kafka_cluster.example_aws_private_link_cluster.bootstrap_endpoint}", "SASL_SSL://")
-    api_key = "${each.value.id}"
-    api_secret = "${each.value.secret}"
-    topic = var.ccloud_cluster_topic
-    consumer_group_prefix = var.ccloud_cluster_consumer_group_prefix
+    api_key = "${each.value["cluster_api_key"].id}"
+    api_secret = "${each.value["cluster_api_key"].secret}"
+    consumer_group_prefix = "${var.ccloud_cluster_consumer_group_prefixes[0]}.demo"
+    schema_registry_url = data.confluent_schema_registry_cluster.example_schema_registry.private_regional_rest_endpoints[var.aws_region]
+    schema_registry_user = "${each.value["sr_api_key"].id}"
+    schema_registry_password = "${each.value["sr_api_key"].secret}"
   }
   )
   filename = "${var.generated_files_path}/client-${each.key}.conf"

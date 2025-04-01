@@ -118,10 +118,19 @@ variable "ccloud_cluster_topic" {
     description = "The name of the Kafka topic to create and to subscribe to"
 }
 
-variable "ccloud_cluster_consumer_group_prefix" {
-    type = string
-    default = "client-"
-    description = "The name of the Kafka consumer group prefix to grant access to the Kafka consumer"
+variable "ccloud_cluster_producer_write_topic_prefixes" {
+    type = list
+    description = "A list of Kafka topic prefixes to grant write access to the example producer"
+}
+
+variable "ccloud_cluster_consumer_read_topic_prefixes" {
+    type = list
+    description = "A list of Kafka topic prefixes to grant read access to the example consumer"
+}
+
+variable "ccloud_cluster_consumer_group_prefixes" {
+    type = list
+    description = "A list of Kafka consumer group prefixes to grant read access to the example consumer"
 }
 
 variable "ccloud_cluster_generate_client_config_files" {
