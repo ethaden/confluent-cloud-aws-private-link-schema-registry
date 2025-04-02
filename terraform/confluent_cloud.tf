@@ -1,5 +1,10 @@
 # Confluent Cloud Environment
 
+locals {
+  bootstrap_prefix = split(".", confluent_kafka_cluster.cc_cluster.bootstrap_endpoint)[0]
+  dns_domain = confluent_network.aws-private-link.dns_domain
+}
+
 resource "confluent_environment" "cc_env" {
   display_name = var.ccloud_environment_name
 
@@ -146,29 +151,113 @@ resource "confluent_private_link_access" "aws" {
   }
 }
 
+resource "aws_security_group" "privatelink_dedicated" {
+  # Ensure that SG is unique, so that this module can be used multiple times within a single VPC
+  name        = "ccloud-privatelink_${local.bootstrap_prefix}_${data.aws_vpc.vpc.id}"
+  description = "Confluent Cloud Private Link minimal security group for ${confluent_kafka_cluster.cc_cluster.bootstrap_endpoint} in ${data.aws_vpc.vpc.id}"
+  vpc_id      = data.aws_vpc.vpc.id
+
+  ingress {
+    # only necessary if redirect support from http/https is desired
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.vpc.cidr_block]
+    ipv6_cidr_blocks = [data.aws_vpc.vpc.ipv6_cidr_block]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.vpc.cidr_block]
+    ipv6_cidr_blocks = [data.aws_vpc.vpc.ipv6_cidr_block]
+  }
+
+  ingress {
+    from_port   = 9092
+    to_port     = 9092
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.vpc.cidr_block]
+    ipv6_cidr_blocks = [data.aws_vpc.vpc.ipv6_cidr_block]
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_endpoint" "privatelink_dedicated" {
+  vpc_id            = data.aws_vpc.vpc.id
+  service_name      = confluent_network.aws-private-link.aws[0].private_link_endpoint_service
+  vpc_endpoint_type = "Interface"
+
+  security_group_ids = [
+    aws_security_group.privatelink_dedicated.id,
+  ]
+
+  subnet_ids          = data.aws_subnets.vpc_subnets.ids
+  private_dns_enabled = false
+
+  depends_on = [
+    confluent_private_link_access.aws,
+  ]
+}
+
+# DNS for the private link connection to the dedicated cluster
+resource "aws_route53_zone" "privatelink_dedicated" {
+  name = local.dns_domain
+
+  vpc {
+    vpc_id = data.aws_vpc.vpc.id
+  }
+}
+
+resource "aws_route53_record" "privatelink_dedicated" {
+  zone_id = aws_route53_zone.privatelink_dedicated.zone_id
+  name    = "*.${aws_route53_zone.privatelink_dedicated.name}"
+  type    = "CNAME"
+  ttl     = "60"
+  records = [
+    aws_vpc_endpoint.privatelink_dedicated.dns_entry[0]["dns_name"]
+  ]
+}
+
+locals {
+  endpoint_prefix = split(".", aws_vpc_endpoint.privatelink_dedicated.dns_entry[0]["dns_name"])[0]
+}
+
+resource "aws_route53_record" "privatelink_dedicated_zonal" {
+  # Note: We need the real ID of the availability zone here (e.g. euw1-az1), NOT the name as seen by the VPC (which is different)
+  for_each = { for index, subnet in data.aws_subnet.vpc_subnet: subnet.availability_zone_id => subnet.availability_zone }
+
+  zone_id = aws_route53_zone.privatelink_dedicated.zone_id
+  name    = "*.${each.key}"
+  type    = "CNAME"
+  ttl     = "60"
+  records = [
+    format("%s-%s%s",
+      local.endpoint_prefix,
+      each.value,
+      replace(aws_vpc_endpoint.privatelink_dedicated.dns_entry[0]["dns_name"], local.endpoint_prefix, "")
+    )
+  ]
+}
+
+
 # Create a private link attachment in Confluent Cloud
-resource "confluent_private_link_attachment" "private_link_attachment" {
+resource "confluent_private_link_attachment" "private_link_serverless" {
   cloud = "AWS"
   region = var.aws_region
-  display_name = "${local.resource_prefix}_aws_private_link_attachment"
+  display_name = "${local.resource_prefix}_private_link_serverless"
   environment {
     id = confluent_environment.cc_env.id
   }
 }
 
-resource "aws_security_group" "private_link_endpoint_sg" {
-  name        = "${local.resource_prefix}_aws_private_link_endpoint_sg"
+resource "aws_security_group" "private_link_serverless" {
+  name        = "${local.resource_prefix}_private_link_serverless"
   vpc_id      = data.aws_vpc.vpc.id
-
-#   ingress {
-#     # TLS (change to whatever ports you need)
-#     from_port   = 443
-#     to_port     = 443
-#     protocol    = "tcp"
-#     # Please restrict your ingress to only necessary IPs and ports.
-#     # Opening to 0.0.0.0/0 can lead to security vulnerabilities.
-#     cidr_blocks = # add a CIDR block here
-#   }
 
   dynamic "ingress" {
     for_each = { 1 : 80, 2 : 443, 3 : 9092 }
@@ -189,13 +278,13 @@ resource "aws_security_group" "private_link_endpoint_sg" {
 }
 
 # Set up a private endpoint in AWS
-resource "aws_vpc_endpoint" "private_endpoint" {
+resource "aws_vpc_endpoint" "private_endpoint_serverless" {
   vpc_id            = var.vpc_id
-  service_name      =  confluent_private_link_attachment.private_link_attachment.aws[0].vpc_endpoint_service_name
+  service_name      =  confluent_private_link_attachment.private_link_serverless.aws[0].vpc_endpoint_service_name
   vpc_endpoint_type = "Interface"
 
   security_group_ids = [
-    aws_security_group.private_link_endpoint_sg.id,
+    aws_security_group.private_link_serverless.id,
   ]
 
   subnet_ids          = data.aws_subnets.vpc_subnets.ids
@@ -204,18 +293,39 @@ resource "aws_vpc_endpoint" "private_endpoint" {
 }
 
 # Set up a private link connection in Confluent Cloud, which connects the private endpoint to the private link attachment
-resource "confluent_private_link_attachment_connection" "aws" {
+resource "confluent_private_link_attachment_connection" "private_link_serverless" {
   display_name ="${local.resource_prefix}_platt"
   environment {
     id = confluent_environment.cc_env.id
   }
   aws {
-    vpc_endpoint_id = aws_vpc_endpoint.private_endpoint.id
+    vpc_endpoint_id = aws_vpc_endpoint.private_endpoint_serverless.id
   }
   private_link_attachment {
-    id = confluent_private_link_attachment.private_link_attachment.id
+    id = confluent_private_link_attachment.private_link_serverless.id
   }
 }
+
+# DNS for the private link connection to the serverless products (i.e. schema registry)
+resource "aws_route53_zone" "privatelink_serverless" {
+  name = "${var.aws_region}.aws.private.confluent.cloud"
+
+  vpc {
+    vpc_id = data.aws_vpc.vpc.id
+  }
+}
+
+resource "aws_route53_record" "privatelink_serverless" {
+  zone_id = aws_route53_zone.privatelink_serverless.zone_id
+  name    = "*.${aws_route53_zone.privatelink_serverless.name}"
+  type    = "CNAME"
+  ttl     = "60"
+  records = [
+    #aws_vpc_endpoint.privatelink.dns_entry[0]["dns_name"]
+    aws_vpc_endpoint.private_endpoint_serverless.dns_entry[0].dns_name
+  ]
+}
+
 
 #output "private_link_attachment_connection" {
 #  value = confluent_private_link_attachment_connection
@@ -239,7 +349,7 @@ resource "confluent_kafka_topic" "cc_cluster_topic_test" {
 }
 
 # Service Account, API Key and role bindings for the cluster admin
-resource "confluent_service_account" "cc_cluster_sa_admin" {
+resource "confluent_service_account" "cc_cluster_admin" {
   display_name = "${local.resource_prefix}_cc_cluster_admin"
   description  = "Service Account Cluster Admin"
 }
@@ -249,9 +359,9 @@ resource "confluent_api_key" "cc_cluster_admin_api_key" {
   display_name = "${local.resource_prefix}_cc_cluster_admin_api_key"
   description  = "Kafka API Key that is owned by '${local.resource_prefix}_cc_cluster_admin' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_admin.id
-    api_version = confluent_service_account.cc_cluster_sa_admin.api_version
-    kind        = confluent_service_account.cc_cluster_sa_admin.kind
+    id          = confluent_service_account.cc_cluster_admin.id
+    api_version = confluent_service_account.cc_cluster_admin.api_version
+    kind        = confluent_service_account.cc_cluster_admin.kind
   }
 
   managed_resource {
@@ -270,15 +380,14 @@ resource "confluent_api_key" "cc_cluster_admin_api_key" {
   # We could run this immediately, but we wait for DNS for the private link and the admin role binding to be configured first.
   # By waiting here, the setup of all resources using this api key will be delayed until the private link is available
   depends_on = [ 
-    aws_route53_record.privatelink,
-    aws_route53_record.privatelink-zonal, 
-    confluent_role_binding.cc_cluster_role_binding_admin
+    aws_route53_record.privatelink_dedicated,
+    aws_route53_record.privatelink_dedicated_zonal, 
     ]
 }
 
 # Assign the CloudClusterAdmin role to the cluster admin service account
 resource "confluent_role_binding" "cc_cluster_role_binding_admin" {
-  principal   = "User:${confluent_service_account.cc_cluster_sa_admin.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_admin.id}"
   role_name   = "CloudClusterAdmin"
   crn_pattern = confluent_kafka_cluster.cc_cluster.rbac_crn
   lifecycle {
@@ -291,9 +400,9 @@ resource "confluent_api_key" "cc_env_schema_registry_cluster_admin_api_key" {
   display_name = "${var.resource_prefix}_cc_env_schema_registry_cluster_admin_api_key"
   description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_cc_cluster_admin' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_admin.id
-    api_version = confluent_service_account.cc_cluster_sa_admin.api_version
-    kind        = confluent_service_account.cc_cluster_sa_admin.kind
+    id          = confluent_service_account.cc_cluster_admin.id
+    api_version = confluent_service_account.cc_cluster_admin.api_version
+    kind        = confluent_service_account.cc_cluster_admin.kind
   }
 
   managed_resource {
@@ -312,14 +421,14 @@ resource "confluent_api_key" "cc_env_schema_registry_cluster_admin_api_key" {
 }
 
 resource "confluent_role_binding" "cc_env_schema_registry_admin_role_binding" {
-  principal   = "User:${confluent_service_account.cc_cluster_sa_admin.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_admin.id}"
   role_name   = "ResourceOwner"
   crn_pattern = "${data.confluent_schema_registry_cluster.cc_env_schema_registry.resource_name}/subject=*"
 }
 
 
 # Service Account, API Key and role bindings for the producer
-resource "confluent_service_account" "cc_cluster_sa_producer" {
+resource "confluent_service_account" "cc_cluster_producer" {
   display_name = "${local.resource_prefix}_cc_cluster_producer"
   description  = "Service Account Producer"
 }
@@ -328,9 +437,9 @@ resource "confluent_api_key" "cc_cluster_producer_api_key" {
   display_name = "${local.resource_prefix}_cc_cluster_producer_api_key"
   description  = "Kafka API Key that is owned by '${local.resource_prefix}_cc_cluster_producer' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_producer.id
-    api_version = confluent_service_account.cc_cluster_sa_producer.api_version
-    kind        = confluent_service_account.cc_cluster_sa_producer.kind
+    id          = confluent_service_account.cc_cluster_producer.id
+    api_version = confluent_service_account.cc_cluster_producer.api_version
+    kind        = confluent_service_account.cc_cluster_producer.kind
   }
 
   managed_resource {
@@ -347,8 +456,8 @@ resource "confluent_api_key" "cc_cluster_producer_api_key" {
     prevent_destroy = false
   }
   depends_on = [ 
-    aws_route53_record.privatelink,
-    aws_route53_record.privatelink-zonal, 
+    aws_route53_record.privatelink_dedicated,
+    aws_route53_record.privatelink_dedicated_zonal, 
     ]
 }
 
@@ -356,7 +465,7 @@ resource "confluent_api_key" "cc_cluster_producer_api_key" {
 resource "confluent_role_binding" "cc_cluster_role_binding_producer" {
   # Instaniciate this block only if the cluster type is NOT basic
   count = var.ccloud_cluster_type=="basic" ? 0 : 1
-  principal   = "User:${confluent_service_account.cc_cluster_sa_producer.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_producer.id}"
   role_name   = "DeveloperWrite"
   crn_pattern = "${confluent_kafka_cluster.cc_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.cc_cluster.id}/topic=${confluent_kafka_topic.cc_cluster_topic_test.topic_name}"
   lifecycle {
@@ -369,9 +478,9 @@ resource "confluent_api_key" "cc_env_schema_registry_producer_api_key" {
   display_name = "${var.resource_prefix}_cc_env_schema_registry_producer_api_key"
   description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_cc_cluster_producer' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_producer.id
-    api_version = confluent_service_account.cc_cluster_sa_producer.api_version
-    kind        = confluent_service_account.cc_cluster_sa_producer.kind
+    id          = confluent_service_account.cc_cluster_producer.id
+    api_version = confluent_service_account.cc_cluster_producer.api_version
+    kind        = confluent_service_account.cc_cluster_producer.kind
   }
 
   managed_resource {
@@ -392,14 +501,14 @@ resource "confluent_api_key" "cc_env_schema_registry_producer_api_key" {
 # In this demo setup, we provide write access to schema registry to the producer. Note: This is not recommended for production environments. Please manage schemas via CI/CD explicitly there.
 resource "confluent_role_binding" "cc_env_schema_registry_producer_role_binding" {
   for_each = toset(var.ccloud_cluster_producer_write_topic_prefixes)
-  principal   = "User:${confluent_service_account.cc_cluster_sa_producer.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_producer.id}"
   role_name   = "DeveloperWrite"
   crn_pattern = "${data.confluent_schema_registry_cluster.cc_env_schema_registry.resource_name}/subject=${each.key}*"
 }
 
 
 # Service Account, API Key and role bindings for the consumer
-resource "confluent_service_account" "cc_cluster_sa_consumer" {
+resource "confluent_service_account" "cc_cluster_consumer" {
   display_name = "${local.resource_prefix}_cc_cluster_consumer"
   description  = "Service Account Consumer"
 }
@@ -409,9 +518,9 @@ resource "confluent_api_key" "cc_cluster_consumer_api_key" {
   display_name = "${local.resource_prefix}_cc_cluster_consumer_api_key"
   description  = "Kafka API Key that is owned by '${local.resource_prefix}_cc_cluster_consumer' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_consumer.id
-    api_version = confluent_service_account.cc_cluster_sa_consumer.api_version
-    kind        = confluent_service_account.cc_cluster_sa_consumer.kind
+    id          = confluent_service_account.cc_cluster_consumer.id
+    api_version = confluent_service_account.cc_cluster_consumer.api_version
+    kind        = confluent_service_account.cc_cluster_consumer.kind
   }
 
   managed_resource {
@@ -428,8 +537,8 @@ resource "confluent_api_key" "cc_cluster_consumer_api_key" {
     prevent_destroy = false
   }
   depends_on = [ 
-    aws_route53_record.privatelink,
-    aws_route53_record.privatelink-zonal, 
+    aws_route53_record.privatelink_dedicated,
+    aws_route53_record.privatelink_dedicated_zonal, 
     ]
 }
 
@@ -437,7 +546,7 @@ resource "confluent_api_key" "cc_cluster_consumer_api_key" {
 resource "confluent_role_binding" "cc_cluster_role_binding_consumer" {
   # Instaniciate this block only if the cluster type is NOT basic
   for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
-  principal   = "User:${confluent_service_account.cc_cluster_sa_consumer.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_consumer.id}"
   role_name   = "DeveloperRead"
   crn_pattern = "${confluent_kafka_cluster.cc_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.cc_cluster.id}/topic=${each.value}"
   lifecycle {
@@ -446,7 +555,7 @@ resource "confluent_role_binding" "cc_cluster_role_binding_consumer" {
 }
 resource "confluent_role_binding" "cc_cluster_role_binding_consumer_group" {
   for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
-  principal   = "User:${confluent_service_account.cc_cluster_sa_consumer.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_consumer.id}"
   role_name   = "DeveloperRead"
   crn_pattern = "${confluent_kafka_cluster.cc_cluster.rbac_crn}/kafka=${confluent_kafka_cluster.cc_cluster.id}/group=${each.value}*"
   lifecycle {
@@ -458,9 +567,9 @@ resource "confluent_api_key" "cc_env_schema_registry_consumer_api_key" {
   display_name = "${var.resource_prefix}_cc_env_schema_registry_consumer_api_key"
   description  = "Schema Registry API Key that is owned by '${var.resource_prefix}_cc_cluster_consumer' service account"
   owner {
-    id          = confluent_service_account.cc_cluster_sa_consumer.id
-    api_version = confluent_service_account.cc_cluster_sa_consumer.api_version
-    kind        = confluent_service_account.cc_cluster_sa_consumer.kind
+    id          = confluent_service_account.cc_cluster_consumer.id
+    api_version = confluent_service_account.cc_cluster_consumer.api_version
+    kind        = confluent_service_account.cc_cluster_consumer.kind
   }
 
   managed_resource {
@@ -480,7 +589,7 @@ resource "confluent_api_key" "cc_env_schema_registry_consumer_api_key" {
 
 resource "confluent_role_binding" "cc_env_schema_registry_consumer_role_binding" {
   for_each = toset(var.ccloud_cluster_consumer_read_topic_prefixes)
-  principal   = "User:${confluent_service_account.cc_cluster_sa_consumer.id}"
+  principal   = "User:${confluent_service_account.cc_cluster_consumer.id}"
   role_name   = "DeveloperRead"
   crn_pattern = "${data.confluent_schema_registry_cluster.cc_env_schema_registry.resource_name}/subject=${each.key}*"
 }
