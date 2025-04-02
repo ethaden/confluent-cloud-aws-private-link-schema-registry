@@ -43,13 +43,13 @@ data "aws_availability_zone" "vpc_availability_zone_name_to_zone" {
 # }
 
 locals {
-  bootstrap_prefix = split(".", confluent_kafka_cluster.example_aws_private_link_cluster.bootstrap_endpoint)[0]
+  bootstrap_prefix = split(".", confluent_kafka_cluster.cc_cluster.bootstrap_endpoint)[0]
 }
 
 resource "aws_security_group" "privatelink" {
   # Ensure that SG is unique, so that this module can be used multiple times within a single VPC
   name        = "ccloud-privatelink_${local.bootstrap_prefix}_${data.aws_vpc.vpc.id}"
-  description = "Confluent Cloud Private Link minimal security group for ${confluent_kafka_cluster.example_aws_private_link_cluster.bootstrap_endpoint} in ${data.aws_vpc.vpc.id}"
+  description = "Confluent Cloud Private Link minimal security group for ${confluent_kafka_cluster.cc_cluster.bootstrap_endpoint} in ${data.aws_vpc.vpc.id}"
   vpc_id      = data.aws_vpc.vpc.id
 
   ingress {
