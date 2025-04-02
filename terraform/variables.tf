@@ -72,6 +72,23 @@ variable "aws_region" {
     description = "The region used to deploy the AWS resources and Confluent Cloud Kafka cluster"
 }
 
+variable "ccloud_environment_name_other" {
+    type = string
+    description = "Name of the Confluent Cloud environment to create for demonstrating cross-environment, cross-region access to schema registry"
+}
+
+variable "ccloud_cluster_name_other" {
+    type = string
+    description = "Name of a basic the cluster to be created in the other environment. This will trigger creation of a schema registry in the other region without inducing huge costs"
+}
+
+
+variable "aws_region_other" {
+    type = string
+    default = "eu-west-1"
+    description = "The region used to demonstrate cross-region access to Schema Registry"
+}
+
 variable "aws_account_id" {
     type = string
     description = "The AWS Account ID that will be granted access to the private link access"
