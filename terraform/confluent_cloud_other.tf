@@ -81,11 +81,18 @@ resource "aws_route_table" "second_rt_other" {
    cidr_block = "0.0.0.0/0"
    gateway_id = aws_internet_gateway.gw_other.id
  }
- 
+
  tags = {
    Name = "2nd Route Table"
  }
 }
+
+ resource "aws_route_table_association" "second_rt_other" {
+   for_each = {for subnet in aws_subnet.public_subnets_other:  subnet.id => subnet} 
+   subnet_id      = each.value.id
+   route_table_id = aws_route_table.second_rt_other.id
+   provider = aws.aws_region_other
+ }
 
 resource "aws_key_pair" "ssh_key_other" {
   key_name   = var.ssh_key_name
@@ -111,6 +118,29 @@ data "aws_ami" "ubuntu_noble" {
     provider = aws.aws_region_other
 }
 
+resource "aws_security_group" "aws_test_vm" {
+  name        = "${local.resource_prefix}_aws_test_vm"
+  vpc_id      = aws_vpc.aws_vpc_other.id
+  provider = aws.aws_region_other
+
+  dynamic "ingress" {
+    for_each = { 1 : 22 }
+    content {
+      protocol         = "tcp"
+      cidr_blocks      = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = ["::/0"]
+      from_port        = ingress.value
+      to_port          = ingress.value
+    }
+  }
+  egress {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    cidr_blocks     = ["0.0.0.0/0"]
+  }
+}
+
 resource "aws_instance" "aws_test_vm" {
   ami = data.aws_ami.ubuntu_noble.id
   instance_type     = "t2.micro"
@@ -118,7 +148,9 @@ resource "aws_instance" "aws_test_vm" {
   subnet_id                   = aws_subnet.public_subnets_other[0].id
   associate_public_ip_address = true
   provider = aws.aws_region_other
-
+  vpc_security_group_ids = [
+    aws_security_group.aws_test_vm.id
+  ]
   root_block_device {
     delete_on_termination = true
     volume_size           = 50
@@ -185,6 +217,10 @@ resource "aws_vpc_endpoint" "private_endpoint_serverless_other" {
     aws_subnet.public_subnets_other[1].id,
     aws_subnet.public_subnets_other[2].id
    ]
+  tags = {
+      Name = "${var.resource_prefix}_private_endpoint_serverless"
+  }
+
   # Only for AWS and AWS Marketplace partner services. We configure our own hosted zone instead
   private_dns_enabled = false
 }

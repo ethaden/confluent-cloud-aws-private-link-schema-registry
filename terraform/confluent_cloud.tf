@@ -199,6 +199,10 @@ resource "aws_vpc_endpoint" "privatelink_dedicated" {
   subnet_ids          = data.aws_subnets.vpc_subnets.ids
   private_dns_enabled = false
 
+  tags = {
+      Name = "${var.resource_prefix}_privatelink_dedicated"
+  }
+
   depends_on = [
     confluent_private_link_access.aws,
   ]
@@ -286,6 +290,9 @@ resource "aws_vpc_endpoint" "private_endpoint_serverless" {
   security_group_ids = [
     aws_security_group.private_link_serverless.id,
   ]
+  tags = {
+      Name = "${var.resource_prefix}_private_endpoint_serverless"
+  }
 
   subnet_ids          = data.aws_subnets.vpc_subnets.ids
   # Only for AWS and AWS Marketplace partner services. We configure our own hosted zone instead
@@ -606,6 +613,9 @@ output "cluster_rest_endpoint" {
     value = confluent_kafka_cluster.cc_cluster.rest_endpoint
 }
 
+output "schema_registry_private_endpoint" {
+    value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region]
+}
 # The next entries demonstrate how to output the generated API keys to the console even though they are considered to be sensitive data by Terraform
 # Uncomment these lines if you want to generate that output
 # output "cluster_api_key_admin" {
