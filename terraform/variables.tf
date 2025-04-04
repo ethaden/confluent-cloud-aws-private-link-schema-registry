@@ -1,5 +1,15 @@
 
 # Recommendation: Overwrite the default in tfvars or stick with the automatic default
+variable "ssh_key_name" {
+    type = string
+    description = "Name of the pre-existing SSH key to use in AWS"
+}
+
+variable "ssh_key_public" {
+    type = string
+    description = "The public key to be added to the machine"
+}
+
 variable "tf_last_updated" {
     type = string
     default = ""
@@ -85,8 +95,26 @@ variable "ccloud_cluster_name_other" {
 
 variable "aws_region_other" {
     type = string
-    default = "eu-west-1"
+    default = "eu-west-3"
     description = "The region used to demonstrate cross-region access to Schema Registry"
+}
+
+variable "azs_other" {
+ type        = list(string)
+ default     = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
+ description = "Availability Zones"
+}
+
+variable "public_subnet_cidrs_other" {
+ type        = list(string)
+ description = "Public Subnet CIDR values"
+ default     = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+}
+ 
+variable "private_subnet_cidrs_other" {
+ type        = list(string)
+ description = "Private Subnet CIDR values"
+ default     = ["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"]
 }
 
 variable "aws_account_id" {

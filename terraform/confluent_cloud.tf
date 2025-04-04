@@ -346,6 +346,11 @@ resource "confluent_kafka_topic" "cc_cluster_topic_test" {
   lifecycle {
     prevent_destroy = false
   }
+  depends_on = [
+    aws_route53_record.privatelink_dedicated,
+    aws_route53_record.privatelink_dedicated_zonal,
+    confluent_network.aws-private-link
+  ]
 }
 
 # Service Account, API Key and role bindings for the cluster admin

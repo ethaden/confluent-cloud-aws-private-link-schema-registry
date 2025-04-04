@@ -22,3 +22,12 @@ provider "aws" {
       tags = local.confluent_tags
     }
 }
+
+provider "aws" {
+  region = var.aws_region_other
+  alias = "aws_region_other"
+
+    default_tags {
+      tags = local.confluent_tags
+    }
+}

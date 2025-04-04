@@ -12,3 +12,5 @@ aws_account_id = "THE ACCOUNT ID"
 ccloud_cluster_producer_write_topic_prefixes = ["prefix1", "prefix2"]
 ccloud_cluster_consumer_group_prefixes = ["prefix1", "prefix2"]
 ccloud_cluster_consumer_read_topic_prefixes = ["prefix1", "prefix2"]
+ssh_key_name = "YOUR_SSH_KEY_NAME"
+ssh_key_public = "YOUR_PUBLIC_SSH_KEY"
