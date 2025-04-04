@@ -18,10 +18,10 @@ data "confluent_schema_registry_cluster" "cc_env_schema_registry_other" {
       id = confluent_environment.cc_env_other.id
     }
     # Using this dependency avoids a potential race condition where the schema registry is still created while terraform already tries to access it (which will fail)
-    depends_on = [ confluent_kafka_cluster.cc_cluster_other ]
+    depends_on = [ confluent_kafka_cluster.cc_cluster_other_region_other_environment ]
 }
 
-resource "confluent_kafka_cluster" "cc_cluster_other" {
+resource "confluent_kafka_cluster" "cc_cluster_other_region_other_environment" {
   display_name = var.ccloud_cluster_name_other
   availability = "SINGLE_ZONE"
   cloud        = "AWS"
@@ -38,6 +38,23 @@ resource "confluent_kafka_cluster" "cc_cluster_other" {
   }
 }
 
+# This cluster is only required for initiating the Confluent-internal connectivity to the Schema Registry
+resource "confluent_kafka_cluster" "cc_cluster_other_region_same_environment" {
+  display_name = var.ccloud_cluster_name_other
+  availability = "SINGLE_ZONE"
+  cloud        = "AWS"
+  region       = var.aws_region_other
+  # For cost reasons, we use a basic cluster by default. However, you can choose a different type by setting the variable ccloud_cluster_type
+  basic {}
+
+  environment {
+    id = confluent_environment.cc_env.id
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
 # AWS
 resource "aws_vpc" "aws_vpc_other" {
   cidr_block       = "10.0.0.0/16"
@@ -241,7 +258,7 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
 
 # DNS for the private link connection to the serverless products (i.e. schema registry)
 resource "aws_route53_zone" "private_link_serverless_other_region" {
-  name = "${var.aws_region}.aws.private.confluent.cloud"
+  name = "${var.aws_region_other}.aws.private.confluent.cloud"
   provider = aws.aws_region_other
 
   vpc {
@@ -258,4 +275,9 @@ resource "aws_route53_record" "private_link_serverless_other_region" {
     aws_vpc_endpoint.private_endpoint_serverless_other.dns_entry[0].dns_name
   ]
   provider = aws.aws_region_other
+}
+
+output "schema_registry_private_endpoint_other_region" {
+  value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region_other]
+  depends_on = [ confluent_kafka_cluster.cc_cluster_other_region_same_environment ]
 }
