@@ -281,3 +281,7 @@ output "schema_registry_private_endpoint_other_region" {
   value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region_other]
   depends_on = [ confluent_kafka_cluster.cc_cluster_other_region_same_environment ]
 }
+
+output "cc_other_environment_id" {
+    value = confluent_environment.cc_env_other.id
+}

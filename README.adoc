@@ -10,7 +10,8 @@ You need the following to run this demo:
 
 * A Confluent Cloud Organization.
 * A Confluent Cloud API Key with sufficient access permissions to set up a dedicated cluster and an identity provider including identity pools
-* Optionally, this demo can generate a certificate authority (CA) and client certificates in PEM as well as JKS format. For the conversion from PEM to JKS, both `openssl` as well as `keytool` need to be installed and in the PATH.
+* An existing AWS VPC in your primary region (where your Schema Registry instance is deployed)
+* Optionally, a VM in that primary VPC for testing
 
 == Getting started
 
@@ -23,15 +24,31 @@ terraform init
 terraform apply
 ```
 
+This will create some resources:
+
+* A separate environment in Confluent Cloud
+* A dedicated cluster in that environment with private networking
+* A private link to the dedicated cluster in your existing AWS VPC with the corresponding hosted zone
+* Another private link for the serverless products (including Schema Registry) with the corresponding hosted zone
+* Some extra resources such as security groups
+* Three service accounts for the cluster: an admin, a producer and a consumer
+* Corresponding config files including API keys for the cluster and for Schema Registry for use with standard Kafka CLI tools
+* Another VPC in the second region you specify, including public subnets, an internet gateway, etc.
+* A basic cluster in that second region, but in the same Confluent Cloud environment (this will trigger the creation of the internal network interconnect for private networking)
+* A private link for serverless products in that other VPC and the corresponding hosted zones
+
 == Using the setup
 
-The demo sets up a dedicated cluster with private networking. In order to access it, you need to run your producers and consumers in the VPC used to set things up (where you have private link configured).
+By default, this demo sets up a dedicated cluster with private networking (the dedicated cluster will induce some costs, be careful).
+In order to access it, you need to run your producers and consumers in the VPC used to set things up (where you have private link configured).
 
 The final step of the setup will have printed some config vaules. You can print them again by running:
 
 ```shell
 terraform output
 ```
+
+=== Accessing the dedicated cluster
 
 Let's set some environment variables for convenience:
 
@@ -57,6 +74,35 @@ Consume what we have just written (stop consuming events with `Ctrl-C`):
 
 ```shell
 kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVER} --consumer.config generated/client-consumer.conf --topic test --from-beginning
+```
+
+=== Accessing Schema Registry
+
+Use the regional URLs for accessing Schema Registry. The instance will be located in your primary region, but access will be possible from the second region, too, mainly transparent for the client.
+
+=== Schema Linking 
+
+Every Confluent Cloud environment has exactly one Schema Registry instance. Therefore, this demo deploys a second environment where a second Schema Registry instance is deployed in the other AWS region. This is triggered by spawning a basic cluster in that region in the environment.
+
+It is now possible to use schema linking from the SR instance in the primary region to the instance in the other environment. This demonstrates the ability to do cross-region cross-environment schema linking.
+
+Set up schema linking like this:
+
+```shell
+confluent login
+```
+
+Get the IDs of the regions and other data from terraform:
+
+```shell
+export CCLOUD_REGION_PRIMARY=$(terraform output -raw cc_primary_environment_id)
+export CCLOUD_REGION_OTHER=$(terraform output -raw cc_other_environment_id)
+```
+
+Use the environment:
+
+```shell
+confluent env use ${CCLOUD_REGION_PRIMARY}
 ```
 
 
