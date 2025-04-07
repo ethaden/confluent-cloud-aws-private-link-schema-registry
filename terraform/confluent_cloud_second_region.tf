@@ -104,12 +104,12 @@ resource "aws_route_table" "second_rt_other" {
  }
 }
 
- resource "aws_route_table_association" "second_rt_other" {
-   for_each = {for subnet in aws_subnet.public_subnets_other:  subnet.id => subnet} 
-   subnet_id      = each.value.id
-   route_table_id = aws_route_table.second_rt_other.id
-   provider = aws.aws_region_other
- }
+#  resource "aws_route_table_association" "second_rt_other" {
+#    for_each = {for subnet in aws_subnet.public_subnets_other:  subnet.id => subnet} 
+#    subnet_id      = each.value.id
+#    route_table_id = aws_route_table.second_rt_other.id
+#    provider = aws.aws_region_other
+#  }
 
 resource "aws_key_pair" "ssh_key_other" {
   key_name   = var.ssh_key_name
