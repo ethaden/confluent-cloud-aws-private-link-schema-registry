@@ -6,6 +6,7 @@ ccloud_cluster_generate_client_config_files = true
 ccloud_environment_name = "my-test-env"
 ccloud_environment_name_other = "my-other-test-env"
 ccloud_cluster_name = "my-test-cluster"
+#ccloud_cluster_type = "enterprise"
 ccloud_cluster_name_other = "my-other-test-cluster"
 vpc_id = "THE VPC ID"
 aws_account_id = "THE ACCOUNT ID"

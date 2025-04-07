@@ -6,7 +6,7 @@ locals {
 # Set up a dedicated cluster or an enterprise cluster
 resource "confluent_kafka_cluster" "cc_cluster" {
   display_name = var.ccloud_cluster_name
-  availability = var.ccloud_cluster_availability
+  availability = var.ccloud_cluster_type=="dedicated" ? var.ccloud_cluster_availability : "HIGH"
   cloud        = "AWS"
   region       = var.aws_region
   # Use standard if you want to have the ability to grant role bindings on topic scope
@@ -29,8 +29,11 @@ resource "confluent_kafka_cluster" "cc_cluster" {
   }
 
   # Private networking for either a dedicated cluster (requires a dedicated private link connection) or an Enterprise cluster (re-uses the existing serverless private link connection, PLATT)
-  network {
-    id = var.ccloud_cluster_type=="dedicated" ? confluent_network.aws-private-link[0].id : confluent_private_link_attachment.private_link_serverless.id
+  dynamic "network" {
+    for_each = var.ccloud_cluster_type=="dedicated" ? [true] : []
+    content {
+      id = confluent_network.aws-private-link[0].id
+    }
   }
   environment {
     id = confluent_environment.cc_env.id
@@ -154,9 +157,9 @@ resource "aws_route53_record" "privatelink_dedicated" {
   ]
 }
 
-locals {
-  endpoint_prefix = split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0]
-}
+#locals {
+#  endpoint_prefix = split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0]
+#}
 
 # Note: We cannot combine "count" with "for_each". Therefore we use an empty map "{}" if the cluster type is not dedicated
 resource "aws_route53_record" "privatelink_dedicated_zonal" {
@@ -169,9 +172,10 @@ resource "aws_route53_record" "privatelink_dedicated_zonal" {
   ttl     = "60"
   records = [
     format("%s-%s%s",
-      local.endpoint_prefix,
+      split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0],
       each.value,
-      replace(aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"], local.endpoint_prefix, "")
+      replace(aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"], 
+      split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0], "")
     )
   ]
 }
