@@ -42,6 +42,12 @@ resource "confluent_kafka_cluster" "cc_cluster" {
   lifecycle {
     prevent_destroy = false
   }
+  # if we use Enterprise, this cluster depends on the serverless private link. It does not hurt to add it here
+  depends_on = [
+    confluent_private_link_attachment.private_link_serverless,
+    confluent_private_link_attachment_connection.private_link_serverless,
+    aws_route53_record.privatelink_serverless
+  ]
 }
 
 # Note: A cluster-specific private link is only required for a dedicate cluster.

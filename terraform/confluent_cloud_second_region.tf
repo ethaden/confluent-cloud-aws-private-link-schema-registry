@@ -36,6 +36,9 @@ resource "confluent_kafka_cluster" "cc_cluster_other_region_other_environment" {
   lifecycle {
     prevent_destroy = false
   }
+  # We need to add a dependency to the main cluster.
+  # Otherwise, the Schema Registry instance might be spawned in var.aws_region_other if this cluster "wins the race" and is spawned first
+  depends_on = [ confluent_kafka_cluster.cc_cluster ]
 }
 
 # This cluster is only required for initiating the Confluent-internal connectivity to the Schema Registry
@@ -54,6 +57,7 @@ resource "confluent_kafka_cluster" "cc_cluster_other_region_same_environment" {
   lifecycle {
     prevent_destroy = false
   }
+  depends_on = [ confluent_kafka_cluster.cc_cluster ]
 }
 # AWS
 resource "aws_vpc" "aws_vpc_other" {

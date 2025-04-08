@@ -1,5 +1,7 @@
 # Confluent Cloud Environment
 
+data "confluent_organization" "cc_org" {}
+
 resource "confluent_environment" "cc_env" {
   display_name = var.ccloud_environment_name
 
@@ -59,7 +61,7 @@ data "confluent_schema_registry_cluster_config" "cc_env_schema_registry" {
   schema_registry_cluster {
     id = data.confluent_schema_registry_cluster.cc_env_schema_registry.id
   }
-  rest_endpoint = data.confluent_schema_registry_cluster.cc_env_schema_registry.rest_endpoint
+  rest_endpoint = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region]
   credentials {
     key    = confluent_api_key.cc_env_schema_registry_cluster_admin_api_key.id
     secret = confluent_api_key.cc_env_schema_registry_cluster_admin_api_key.secret
@@ -146,7 +148,6 @@ resource "aws_route53_record" "privatelink_serverless" {
   type    = "CNAME"
   ttl     = "60"
   records = [
-    #aws_vpc_endpoint.privatelink.dns_entry[0]["dns_name"]
     aws_vpc_endpoint.private_endpoint_serverless.dns_entry[0].dns_name
   ]
 }
@@ -168,6 +169,27 @@ output "schema_registry_private_endpoint" {
 # output "cluster_api_key_consumer" {
 #     value = nonsensitive("Key: ${confluent_api_key.cc_cluster_consumer_api_key.id}\nSecret: ${confluent_api_key.cc_cluster_consumer_api_key.secret}")
 # }
+
+# Currently, the Confluent Terraform provider does not support IP Filtering, only the REST API does.
+# Thus, just for this demo, we use generic REST calls instead (TBD)
+# IP group "ipg-none" is pre-defined and includes all IPv4 IP addresses.
+resource "restapi_object" "ip_filter_schema_registry" {
+  path = "/iam/v2/ip-filters"
+  data = "${jsonencode(
+    {
+        "api_version" = "iam/v2",
+        "kind" = "IpFilter",
+        "filter_name" = "Block_Public_Access_Schema_Registry",
+        "resource_group" = "multiple",
+        "resource_scope" = "crn://confluent.cloud/organization=${data.confluent_organization.cc_org.id}/environment=${confluent_environment.cc_env.id}",
+        "operation_groups" = ["SCHEMA"],
+        "ip_groups" = [
+        {"id" = "ipg-none"}
+        ]
+    })}"
+}
+
+# crn://confluent.cloud/organization=${confluent_organization.cc_org.id}/environment=${confluent_environment.cc_env.id}
 
 output "cc_primary_environment_id" {
     value = confluent_environment.cc_env.id
