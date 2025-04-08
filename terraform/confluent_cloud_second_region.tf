@@ -57,6 +57,8 @@ resource "confluent_kafka_cluster" "cc_cluster_other_region_same_environment" {
   lifecycle {
     prevent_destroy = false
   }
+  # We need to add a dependency to the main cluster.
+  # Otherwise, the Schema Registry instance might be spawned in var.aws_region_other if this cluster "wins the race" and is spawned first
   depends_on = [ confluent_kafka_cluster.cc_cluster ]
 }
 # AWS
@@ -281,9 +283,20 @@ resource "aws_route53_record" "private_link_serverless_other_region" {
   provider = aws.aws_region_other
 }
 
+# This is just a dirty hack for this demo: As setting up new regional private links to schema registry takes some time, the output 
+# "schema_registry_private_endpoint_other_region" will fail if we don't wait a bit
+#resource "time_sleep" "wait_for_regional_private_link_to_schema_registry" {
+#  create_duration = "20s"
+#  depends_on = [ 
+#    confluent_kafka_cluster.cc_cluster_other_region_same_environment,
+#    aws_route53_record.private_link_serverless_other_region,
+#    confluent_private_link_attachment_connection.private_link_serverless_other_region
+#   ]
+#}
 output "schema_registry_private_endpoint_other_region" {
   value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region_other]
-  depends_on = [ confluent_kafka_cluster.cc_cluster_other_region_same_environment ]
+  # We need to delay the execution of the above statement slightly by adding dependencies, otherwise the private regional endpoint
+  # for the schema registry instance for the "aws.aws_region_other" might not be available yet (as it is still provisioning)
 }
 
 output "cc_other_environment_id" {

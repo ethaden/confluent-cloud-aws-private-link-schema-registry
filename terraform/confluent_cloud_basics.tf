@@ -15,11 +15,16 @@ resource "confluent_environment" "cc_env" {
 }
 
 data "confluent_schema_registry_cluster" "cc_env_schema_registry" {
-    environment {
-      id = confluent_environment.cc_env.id
-    }
-    # Using this dependency avoids a potential race condition where the schema registry is still created while terraform already tries to access it (which will fail)
-    depends_on = [ confluent_kafka_cluster.cc_cluster ]
+  environment {
+    id = confluent_environment.cc_env.id
+  }
+  # Using this dependency avoids a potential race condition where the schema registry is still created while terraform already tries to access it (which will fail)
+  depends_on = [ 
+    confluent_kafka_cluster.cc_cluster,
+    confluent_kafka_cluster.cc_cluster_other_region_same_environment,
+    aws_route53_record.private_link_serverless_other_region,
+    confluent_private_link_attachment_connection.private_link_serverless_other_region
+   ]
 }
 
 resource "confluent_service_account" "cc_env_admin" {
