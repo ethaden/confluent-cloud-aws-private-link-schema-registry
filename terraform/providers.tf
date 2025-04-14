@@ -50,7 +50,7 @@ provider "restapi" {
   }
 
   create_method  = "POST"
-  update_method  = "PUT"
+  update_method  = "PATCH"
   destroy_method = "DELETE"
 
   id_attribute = "id"

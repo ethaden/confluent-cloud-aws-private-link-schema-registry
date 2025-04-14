@@ -41,7 +41,7 @@ resource "confluent_role_binding" "cc_env_schema_registry_destination_schema_lin
 resource "local_sensitive_file" "schema_linking_dest_config_file" {
   content = templatefile("${path.module}/templates/schema_linking_dest.conf.tpl",
   {
-    schema_registry_url = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region]
+    schema_registry_url = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region]
     schema_registry_user = confluent_api_key.cc_env_schema_registry_destination_schema_linking_api_key.id
     schema_registry_password = confluent_api_key.cc_env_schema_registry_destination_schema_linking_api_key.secret
     cc_env_source_id = confluent_environment.cc_env.id

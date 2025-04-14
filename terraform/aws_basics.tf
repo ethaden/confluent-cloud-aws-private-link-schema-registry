@@ -39,3 +39,76 @@ data "aws_availability_zone" "vpc_availability_zone_name_to_zone" {
 #     prevent_destroy = false
 #   }
 # }
+
+
+# Set up second region
+# AWS
+resource "aws_vpc" "aws_vpc_other" {
+  cidr_block       = "10.0.0.0/16"
+  instance_tenancy = "default"
+  assign_generated_ipv6_cidr_block = true
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  provider = aws.aws_region_other
+  tags = {
+    Name = "${var.resource_prefix}_vpc"
+  }
+}
+
+resource "aws_subnet" "public_subnets_other" {
+  count             = length(var.public_subnet_cidrs_other)
+  vpc_id            = aws_vpc.aws_vpc_other.id
+  cidr_block        = element(var.public_subnet_cidrs_other, count.index)
+  availability_zone = element(var.azs_other, count.index)
+  enable_resource_name_dns_a_record_on_launch = true
+  map_public_ip_on_launch = true
+  provider = aws.aws_region_other
+ 
+  tags = {
+    Name = "Public Subnet ${count.index + 1}"
+  }
+}
+
+resource "aws_internet_gateway" "gw_other" {
+ vpc_id = aws_vpc.aws_vpc_other.id
+ provider = aws.aws_region_other
+ 
+ tags = {
+   Name = "${var.resource_prefix}_igw"
+ }
+}
+
+resource "aws_route_table" "second_rt_other" {
+ vpc_id = aws_vpc.aws_vpc_other.id
+ provider = aws.aws_region_other
+ route {
+   cidr_block = "0.0.0.0/0"
+   gateway_id = aws_internet_gateway.gw_other.id
+ }
+
+ tags = {
+   Name = "${var.resource_prefix}_2nd_Route_Table"
+ }
+}
+
+resource "aws_route_table_association" "second_rt_other" {
+    #for_each = {for subnet in aws_subnet.public_subnets_other:  subnet.id => subnet}
+    #for_each = toset(aws_subnet.public_subnets_other[*].id)
+    for_each = {for id in [0,1,2]: id => aws_subnet.public_subnets_other[id]}
+    subnet_id      = each.value.id
+    route_table_id = aws_route_table.second_rt_other.id
+    provider = aws.aws_region_other
+}
+
+
+# DNS
+
+# Every VPC has exactly one (!) hosted zone per AWS region
+
+resource "aws_route53_zone" "privatelink_serverless_other_region_other_env" {
+  name = "${var.aws_region_other}.aws.private.confluent.cloud"
+
+  vpc {
+    vpc_id = aws_vpc.aws_vpc_other.id
+  }
+}

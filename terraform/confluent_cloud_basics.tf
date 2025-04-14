@@ -22,8 +22,8 @@ data "confluent_schema_registry_cluster" "cc_env_schema_registry" {
   depends_on = [ 
     confluent_kafka_cluster.cc_cluster,
     confluent_kafka_cluster.cc_cluster_other_region_same_environment,
-    aws_route53_record.private_link_serverless_other_region,
-    confluent_private_link_attachment_connection.private_link_serverless_other_region
+    aws_route53_record.private_link_serverless_other_region_original_env,
+    confluent_private_link_attachment_connection.private_link_serverless_other_region_original_env
    ]
 }
 
@@ -107,7 +107,7 @@ resource "aws_security_group" "private_link_serverless" {
 }
 
 # Set up a private endpoint in AWS
-resource "aws_vpc_endpoint" "private_endpoint_serverless" {
+resource "aws_vpc_endpoint" "private_link_serverless" {
   vpc_id            = var.vpc_id
   service_name      =  confluent_private_link_attachment.private_link_serverless.aws[0].vpc_endpoint_service_name
   vpc_endpoint_type = "Interface"
@@ -116,7 +116,7 @@ resource "aws_vpc_endpoint" "private_endpoint_serverless" {
     aws_security_group.private_link_serverless.id,
   ]
   tags = {
-      Name = "${var.resource_prefix}_private_endpoint_serverless"
+      Name = "${var.resource_prefix}_private_link_serverless"
   }
 
   subnet_ids          = data.aws_subnets.vpc_subnets.ids
@@ -131,7 +131,7 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
     id = confluent_environment.cc_env.id
   }
   aws {
-    vpc_endpoint_id = aws_vpc_endpoint.private_endpoint_serverless.id
+    vpc_endpoint_id = aws_vpc_endpoint.private_link_serverless.id
   }
   private_link_attachment {
     id = confluent_private_link_attachment.private_link_serverless.id
@@ -139,7 +139,9 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
 }
 
 # DNS for the private link connection to the serverless products (i.e. schema registry)
-resource "aws_route53_zone" "privatelink_serverless" {
+
+# First, we create two hosted zones, one per VPC
+resource "aws_route53_zone" "privatelink_serverless_vpc_one_original_region" {
   name = "${var.aws_region}.aws.private.confluent.cloud"
 
   vpc {
@@ -147,13 +149,21 @@ resource "aws_route53_zone" "privatelink_serverless" {
   }
 }
 
+resource "aws_route53_zone" "privatelink_serverless_vpc_two_other_region" {
+  name = "${var.aws_region_other}.aws.private.confluent.cloud"
+  provider = aws.aws_region_other
+  vpc {
+    vpc_id = aws_vpc.aws_vpc_other.id
+  }
+}
+
 resource "aws_route53_record" "privatelink_serverless" {
-  zone_id = aws_route53_zone.privatelink_serverless.zone_id
-  name    = "*.${aws_route53_zone.privatelink_serverless.name}"
+  zone_id = aws_route53_zone.privatelink_serverless_vpc_one_original_region.zone_id
+  name    = "*.${aws_route53_zone.privatelink_serverless_vpc_one_original_region.name}"
   type    = "CNAME"
   ttl     = "60"
   records = [
-    aws_vpc_endpoint.private_endpoint_serverless.dns_entry[0].dns_name
+    aws_vpc_endpoint.private_link_serverless.dns_entry[0].dns_name
   ]
 }
 
@@ -184,7 +194,7 @@ resource "restapi_object" "ip_filter_schema_registry" {
     {
         "api_version" = "iam/v2",
         "kind" = "IpFilter",
-        "filter_name" = "Block_Public_Access_Schema_Registry",
+        "filter_name" = "${var.resource_prefix}_Block_Public_Access_Schema_Registry",
         "resource_group" = "multiple",
         "resource_scope" = "crn://confluent.cloud/organization=${data.confluent_organization.cc_org.id}/environment=${confluent_environment.cc_env.id}",
         "operation_groups" = ["SCHEMA"],
