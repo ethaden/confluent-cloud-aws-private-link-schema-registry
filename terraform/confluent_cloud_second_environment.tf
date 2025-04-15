@@ -164,7 +164,7 @@ resource "confluent_kafka_cluster" "cc_cluster_original_region_other_environment
 # DNS for the private link connection to the serverless products (i.e. schema registry)
 # We use the existing (!) hosted zone here and add just another record for the other schema registry
 resource "aws_route53_record" "privatelink_serverless_other_region_other_env" {
-  zone_id = aws_route53_zone.privatelink_serverless_vpc_one_original_region.zone_id
+  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.zone_id
   #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
   name    = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region]
   type    = "CNAME"
@@ -243,10 +243,24 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
 # DNS for the private link connection to the serverless products (i.e. schema registry)
 # We use the existing (!) hosted zone here and add just another record for the other schema registry
 resource "aws_route53_record" "privatelink_serverless_other_env" {
-  zone_id = aws_route53_zone.privatelink_serverless_vpc_two_other_region.zone_id
+  zone_id = aws_route53_zone.private_link_serverless_vpc_two_other_region.zone_id
   provider = aws.aws_region_other
   #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
-  name    = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region]
+  name    = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region_other]
+  type    = "CNAME"
+  ttl     = "60"
+  records = [
+    aws_vpc_endpoint.private_link_serverless_original_region_other_env.dns_entry[0].dns_name
+  ]
+}
+
+# We make this SR available in the original region, too, by adding a specific record to the hosted zone associated with VPC one
+
+resource "aws_route53_record" "privatelink_serverless_vpc_one_schema_registry_other_env" {
+  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.id
+  #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
+  name    = replace(data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region],
+                "https://", "")
   type    = "CNAME"
   ttl     = "60"
   records = [

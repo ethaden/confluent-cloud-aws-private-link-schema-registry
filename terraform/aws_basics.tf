@@ -100,15 +100,3 @@ resource "aws_route_table_association" "second_rt_other" {
     provider = aws.aws_region_other
 }
 
-
-# DNS
-
-# Every VPC has exactly one (!) hosted zone per AWS region
-
-resource "aws_route53_zone" "privatelink_serverless_other_region_other_env" {
-  name = "${var.aws_region_other}.aws.private.confluent.cloud"
-
-  vpc {
-    vpc_id = aws_vpc.aws_vpc_other.id
-  }
-}

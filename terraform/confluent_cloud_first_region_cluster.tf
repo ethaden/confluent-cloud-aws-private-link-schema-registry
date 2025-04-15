@@ -46,7 +46,7 @@ resource "confluent_kafka_cluster" "cc_cluster" {
   depends_on = [
     confluent_private_link_attachment.private_link_serverless,
     confluent_private_link_attachment_connection.private_link_serverless,
-    aws_route53_record.privatelink_serverless
+    aws_route53_record.privatelink_serverless_vpc_one_original_zone_wildcard_record
   ]
 }
 

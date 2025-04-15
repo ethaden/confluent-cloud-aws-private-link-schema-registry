@@ -97,18 +97,9 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
 }
 
 # DNS for the private link connection to the serverless products (i.e. schema registry)
-resource "aws_route53_zone" "private_link_serverless_other_region_original_env" {
-  name = "${var.aws_region_other}.aws.private.confluent.cloud"
-  provider = aws.aws_region_other
-
-  vpc {
-    vpc_id = aws_vpc.aws_vpc_other.id
-  }
-}
-
-resource "aws_route53_record" "private_link_serverless_other_region_original_env" {
-  zone_id = aws_route53_zone.private_link_serverless_other_region_original_env.zone_id
-  name    = "*.${aws_route53_zone.private_link_serverless_other_region_original_env.name}"
+resource "aws_route53_record" "private_link_serverless_vpc_two_other_region_wildcard_record" {
+  zone_id = aws_route53_zone.private_link_serverless_vpc_two_other_region.zone_id
+  name    = "*.${aws_route53_zone.private_link_serverless_vpc_two_other_region.name}"
   type    = "CNAME"
   ttl     = "60"
   records = [

@@ -22,7 +22,7 @@ data "confluent_schema_registry_cluster" "cc_env_schema_registry" {
   depends_on = [ 
     confluent_kafka_cluster.cc_cluster,
     confluent_kafka_cluster.cc_cluster_other_region_same_environment,
-    aws_route53_record.private_link_serverless_other_region_original_env,
+    aws_route53_record.private_link_serverless_vpc_two_other_region_wildcard_record,
     confluent_private_link_attachment_connection.private_link_serverless_other_region_original_env
    ]
 }
@@ -141,7 +141,7 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
 # DNS for the private link connection to the serverless products (i.e. schema registry)
 
 # First, we create two hosted zones, one per VPC
-resource "aws_route53_zone" "privatelink_serverless_vpc_one_original_region" {
+resource "aws_route53_zone" "private_link_serverless_vpc_one_original_region" {
   name = "${var.aws_region}.aws.private.confluent.cloud"
 
   vpc {
@@ -149,7 +149,7 @@ resource "aws_route53_zone" "privatelink_serverless_vpc_one_original_region" {
   }
 }
 
-resource "aws_route53_zone" "privatelink_serverless_vpc_two_other_region" {
+resource "aws_route53_zone" "private_link_serverless_vpc_two_other_region" {
   name = "${var.aws_region_other}.aws.private.confluent.cloud"
   provider = aws.aws_region_other
   vpc {
@@ -157,9 +157,9 @@ resource "aws_route53_zone" "privatelink_serverless_vpc_two_other_region" {
   }
 }
 
-resource "aws_route53_record" "privatelink_serverless" {
-  zone_id = aws_route53_zone.privatelink_serverless_vpc_one_original_region.zone_id
-  name    = "*.${aws_route53_zone.privatelink_serverless_vpc_one_original_region.name}"
+resource "aws_route53_record" "privatelink_serverless_vpc_one_original_zone_wildcard_record" {
+  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.zone_id
+  name    = "*.${aws_route53_zone.private_link_serverless_vpc_one_original_region.name}"
   type    = "CNAME"
   ttl     = "60"
   records = [
