@@ -161,19 +161,6 @@ resource "confluent_kafka_cluster" "cc_cluster_original_region_other_environment
   ]
 }
 
-# DNS for the private link connection to the serverless products (i.e. schema registry)
-# We use the existing (!) hosted zone here and add just another record for the other schema registry
-resource "aws_route53_record" "privatelink_serverless_other_region_other_env" {
-  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.zone_id
-  #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
-  name    = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region]
-  type    = "CNAME"
-  ttl     = "60"
-  records = [
-    aws_vpc_endpoint.private_link_serverless_original_region_other_env.dns_entry[0].dns_name
-  ]
-}
-
 
 # Private Link serverless connection to the other environment from our original region
 # This is required for Schema Linking from our original SR instance in our original region to the other SR instance (in the other environment) in the other region
@@ -240,25 +227,24 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
   }
 }
 
-# DNS for the private link connection to the serverless products (i.e. schema registry)
-# We use the existing (!) hosted zone here and add just another record for the other schema registry
-resource "aws_route53_record" "privatelink_serverless_other_env" {
+# We use the hosted zones we created before for the VPCs here and add just another specific record for the respective other schema registry to both of them
+# Make SR of second environment (located in the other AWS region) available in the main AWS region
+resource "aws_route53_record" "private_link_serverless_vpc_two_schema_registry_original_env" {
   zone_id = aws_route53_zone.private_link_serverless_vpc_two_other_region.zone_id
   provider = aws.aws_region_other
-  #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
-  name    = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region_other]
+  name    = replace(data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region_other],
+                "https://", "")
   type    = "CNAME"
   ttl     = "60"
   records = [
-    aws_vpc_endpoint.private_link_serverless_original_region_other_env.dns_entry[0].dns_name
+    aws_vpc_endpoint.private_link_serverless_other_region_original_env.dns_entry[0].dns_name
   ]
 }
 
-# We make this SR available in the original region, too, by adding a specific record to the hosted zone associated with VPC one
-
-resource "aws_route53_record" "privatelink_serverless_vpc_one_schema_registry_other_env" {
-  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.id
-  #name    = "*.${aws_route53_zone.privatelink_serverless_other_env.name}"
+# Make SR of second environment (located in the other AWS region) available in the main AWS region
+resource "aws_route53_record" "private_link_serverless_vpc_one_schema_registry_other_env" {
+  zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.zone_id
+  #name    = "*.${aws_route53_zone.private_link_serverless_other_env.name}"
   name    = replace(data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region],
                 "https://", "")
   type    = "CNAME"
@@ -272,6 +258,12 @@ output "cc_other_environment_id" {
     value = confluent_environment.cc_env_other.id
 }
 
-output "schema_registry_private_endpoint_other_env" {
+output "schema_registry_private_endpoint_original_region_other_env" {
     value = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region]
+}
+
+output "schema_registry_private_endpoint_other_region_other_env" {
+  value = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.private_regional_rest_endpoints[var.aws_region_other]
+  # We need to delay the execution of the above statement slightly by adding dependencies, otherwise the private regional endpoint
+  # for the schema registry instance for the "aws.aws_region_other" might not be available yet (as it is still provisioning)
 }

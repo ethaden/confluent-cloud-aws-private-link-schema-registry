@@ -157,7 +157,7 @@ resource "aws_route53_zone" "private_link_serverless_vpc_two_other_region" {
   }
 }
 
-resource "aws_route53_record" "privatelink_serverless_vpc_one_original_zone_wildcard_record" {
+resource "aws_route53_record" "private_link_serverless_vpc_one_original_zone_wildcard_record" {
   zone_id = aws_route53_zone.private_link_serverless_vpc_one_original_region.zone_id
   name    = "*.${aws_route53_zone.private_link_serverless_vpc_one_original_region.name}"
   type    = "CNAME"
@@ -168,7 +168,7 @@ resource "aws_route53_record" "privatelink_serverless_vpc_one_original_zone_wild
 }
 
 
-output "schema_registry_private_endpoint" {
+output "schema_registry_private_endpoint_original_region_main_env" {
     value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region]
 }
 # The next entries demonstrate how to output the generated API keys to the console even though they are considered to be sensitive data by Terraform

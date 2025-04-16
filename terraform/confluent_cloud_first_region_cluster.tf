@@ -46,7 +46,7 @@ resource "confluent_kafka_cluster" "cc_cluster" {
   depends_on = [
     confluent_private_link_attachment.private_link_serverless,
     confluent_private_link_attachment_connection.private_link_serverless,
-    aws_route53_record.privatelink_serverless_vpc_one_original_zone_wildcard_record
+    aws_route53_record.private_link_serverless_vpc_one_original_zone_wildcard_record
   ]
 }
 
@@ -59,7 +59,7 @@ resource "confluent_network" "aws-private-link" {
   display_name     = "${local.resource_prefix}_aws_private_link_network"
   cloud            = "AWS"
   region           = var.aws_region
-  connection_types = ["PRIVATELINK"]
+  connection_types = ["private_link"]
   environment {
     id = confluent_environment.cc_env.id
   }
@@ -87,7 +87,7 @@ resource "confluent_private_link_access" "aws" {
   }
 }
 
-resource "aws_security_group" "privatelink_dedicated" {
+resource "aws_security_group" "private_link_dedicated" {
   count = var.ccloud_cluster_type=="dedicated" ? 1 : 0
   # Ensure that SG is unique, so that this module can be used multiple times within a single VPC
   name        = "ccloud-privatelink_${local.bootstrap_prefix}_${data.aws_vpc.vpc.id}"
@@ -124,14 +124,14 @@ resource "aws_security_group" "privatelink_dedicated" {
   }
 }
 
-resource "aws_vpc_endpoint" "privatelink_dedicated" {
+resource "aws_vpc_endpoint" "private_link_dedicated" {
   count = var.ccloud_cluster_type=="dedicated" ? 1 : 0
   vpc_id            = data.aws_vpc.vpc.id
   service_name      = confluent_network.aws-private-link[0].aws[0].private_link_endpoint_service
   vpc_endpoint_type = "Interface"
 
   security_group_ids = [
-    aws_security_group.privatelink_dedicated[0].id,
+    aws_security_group.private_link_dedicated[0].id,
   ]
 
   subnet_ids          = data.aws_subnets.vpc_subnets.ids
@@ -143,7 +143,7 @@ resource "aws_vpc_endpoint" "privatelink_dedicated" {
 }
 
 # DNS for the private link connection to the dedicated cluster
-resource "aws_route53_zone" "privatelink_dedicated" {
+resource "aws_route53_zone" "private_link_dedicated" {
   count = var.ccloud_cluster_type=="dedicated" ? 1 : 0
   name = confluent_network.aws-private-link[0].dns_domain
 
@@ -152,44 +152,44 @@ resource "aws_route53_zone" "privatelink_dedicated" {
   }
 }
 
-resource "aws_route53_record" "privatelink_dedicated" {
+resource "aws_route53_record" "private_link_dedicated" {
   count = var.ccloud_cluster_type=="dedicated" ? 1 : 0
-  zone_id = aws_route53_zone.privatelink_dedicated[0].zone_id
-  name    = "*.${aws_route53_zone.privatelink_dedicated[0].name}"
+  zone_id = aws_route53_zone.private_link_dedicated[0].zone_id
+  name    = "*.${aws_route53_zone.private_link_dedicated[0].name}"
   type    = "CNAME"
   ttl     = "60"
   records = [
-    aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"]
+    aws_vpc_endpoint.private_link_dedicated[0].dns_entry[0]["dns_name"]
   ]
 }
 
 #locals {
-#  endpoint_prefix = split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0]
+#  endpoint_prefix = split(".", aws_vpc_endpoint.private_link_dedicated[0].dns_entry[0]["dns_name"])[0]
 #}
 
 # Note: We cannot combine "count" with "for_each". Therefore we use an empty map "{}" if the cluster type is not dedicated
-resource "aws_route53_record" "privatelink_dedicated_zonal" {
+resource "aws_route53_record" "private_link_dedicated_zonal" {
   # Note: We need the real ID of the availability zone here (e.g. euw1-az1), NOT the name as seen by the VPC (which is different)
   for_each = { for index, subnet in (var.ccloud_cluster_type=="dedicated" ? data.aws_subnet.vpc_subnet : {}) : subnet.availability_zone_id => subnet.availability_zone }
 
-  zone_id = aws_route53_zone.privatelink_dedicated[0].zone_id
+  zone_id = aws_route53_zone.private_link_dedicated[0].zone_id
   name    = "*.${each.key}"
   type    = "CNAME"
   ttl     = "60"
   records = [
     format("%s-%s%s",
-      split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0],
+      split(".", aws_vpc_endpoint.private_link_dedicated[0].dns_entry[0]["dns_name"])[0],
       each.value,
-      replace(aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"], 
-      split(".", aws_vpc_endpoint.privatelink_dedicated[0].dns_entry[0]["dns_name"])[0], "")
+      replace(aws_vpc_endpoint.private_link_dedicated[0].dns_entry[0]["dns_name"], 
+      split(".", aws_vpc_endpoint.private_link_dedicated[0].dns_entry[0]["dns_name"])[0], "")
     )
   ]
 }
 
-output "cluster_bootstrap_server" {
+output "cluster_first_region_bootstrap_server" {
   value = confluent_kafka_cluster.cc_cluster.bootstrap_endpoint
 }
-output "cluster_rest_endpoint" {
+output "cluster_first_region_rest_endpoint" {
   value = confluent_kafka_cluster.cc_cluster.rest_endpoint
 }
 
@@ -243,8 +243,8 @@ resource "confluent_api_key" "cc_cluster_admin_api_key" {
   # We could run this immediately, but we wait for DNS for the private link and the admin role binding to be configured first.
   # By waiting here, the setup of all resources using this api key will be delayed until the private link is available
   depends_on = [ 
-    aws_route53_record.privatelink_dedicated,
-    aws_route53_record.privatelink_dedicated_zonal,
+    aws_route53_record.private_link_dedicated,
+    aws_route53_record.private_link_dedicated_zonal,
     confluent_network.aws-private-link,
     confluent_private_link_access.aws
     ]
@@ -321,8 +321,8 @@ resource "confluent_api_key" "cc_cluster_producer_api_key" {
     prevent_destroy = false
   }
   depends_on = [ 
-    aws_route53_record.privatelink_dedicated,
-    aws_route53_record.privatelink_dedicated_zonal, 
+    aws_route53_record.private_link_dedicated,
+    aws_route53_record.private_link_dedicated_zonal, 
     ]
 }
 
@@ -402,8 +402,8 @@ resource "confluent_api_key" "cc_cluster_consumer_api_key" {
     prevent_destroy = false
   }
   depends_on = [ 
-    aws_route53_record.privatelink_dedicated,
-    aws_route53_record.privatelink_dedicated_zonal, 
+    aws_route53_record.private_link_dedicated,
+    aws_route53_record.private_link_dedicated_zonal, 
     ]
 }
 

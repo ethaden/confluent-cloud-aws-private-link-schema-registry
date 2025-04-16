@@ -59,7 +59,7 @@ resource "aws_security_group" "private_link_serverless_other_region_original_env
 }
 
 # Set up a private endpoint in AWS
-resource "aws_vpc_endpoint" "private_endpoint_serverless_other" {
+resource "aws_vpc_endpoint" "private_link_serverless_other_region_original_env" {
   vpc_id            = aws_vpc.aws_vpc_other.id
   service_name      =  confluent_private_link_attachment.private_link_serverless_other_region_original_env.aws[0].vpc_endpoint_service_name
   vpc_endpoint_type = "Interface"
@@ -69,13 +69,9 @@ resource "aws_vpc_endpoint" "private_endpoint_serverless_other" {
     aws_security_group.private_link_serverless_other_region_original_env.id,
   ]
 
-  subnet_ids          = [ 
-    aws_subnet.public_subnets_other[0].id,
-    aws_subnet.public_subnets_other[1].id,
-    aws_subnet.public_subnets_other[2].id
-   ]
+  subnet_ids          = [ for index in [0,1,2]: aws_subnet.public_subnets_other[index].id ]
   tags = {
-      Name = "${var.resource_prefix}_private_endpoint_serverless"
+      Name = "${var.resource_prefix}_private_link_serverless_other_region_original_env"
   }
 
   # Only for AWS and AWS Marketplace partner services. We configure our own hosted zone instead
@@ -89,7 +85,7 @@ resource "confluent_private_link_attachment_connection" "private_link_serverless
     id = confluent_environment.cc_env.id
   }
   aws {
-    vpc_endpoint_id = aws_vpc_endpoint.private_endpoint_serverless_other.id
+    vpc_endpoint_id = aws_vpc_endpoint.private_link_serverless_other_region_original_env.id
   }
   private_link_attachment {
     id = confluent_private_link_attachment.private_link_serverless_other_region_original_env.id
@@ -103,7 +99,7 @@ resource "aws_route53_record" "private_link_serverless_vpc_two_other_region_wild
   type    = "CNAME"
   ttl     = "60"
   records = [
-    aws_vpc_endpoint.private_endpoint_serverless_other.dns_entry[0].dns_name
+    aws_vpc_endpoint.private_link_serverless_other_region_other_env.dns_entry[0].dns_name
   ]
   provider = aws.aws_region_other
 }
@@ -118,7 +114,7 @@ resource "aws_route53_record" "private_link_serverless_vpc_two_other_region_wild
 #    confluent_private_link_attachment_connection.private_link_serverless_other_region
 #   ]
 #}
-output "schema_registry_private_endpoint_other_region" {
+output "schema_registry_private_endpoint_other_region_main_env" {
   value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region_other]
   # We need to delay the execution of the above statement slightly by adding dependencies, otherwise the private regional endpoint
   # for the schema registry instance for the "aws.aws_region_other" might not be available yet (as it is still provisioning)
