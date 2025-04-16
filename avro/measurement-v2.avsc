@@ -1,0 +1,10 @@
+{"namespace": "models.avro",
+  "type": "record",
+  "name": "Measurement",
+  "fields": [
+    {"name": "name", "type": "string"},
+    {"name": "value", "type": "string"},
+    {"name": "unit", "type": "string"},
+    {"name": "description", "type": "string", "default": ""}
+  ]
+}

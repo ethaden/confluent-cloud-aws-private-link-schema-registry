@@ -171,6 +171,10 @@ resource "aws_route53_record" "private_link_serverless_vpc_one_original_zone_wil
 output "schema_registry_private_endpoint_original_region_main_env" {
     value = data.confluent_schema_registry_cluster.cc_env_schema_registry.private_regional_rest_endpoints[var.aws_region]
 }
+
+output "schema_registry_original_env_id" {
+    value = data.confluent_schema_registry_cluster.cc_env_schema_registry.id
+}
 # The next entries demonstrate how to output the generated API keys to the console even though they are considered to be sensitive data by Terraform
 # Uncomment these lines if you want to generate that output
 # output "cluster_api_key_admin" {

@@ -10,8 +10,10 @@ You need the following to run this demo:
 
 * A Confluent Cloud Organization.
 * A Confluent Cloud API Key with sufficient access permissions to set up a dedicated cluster and an identity provider including identity pools
-* An existing AWS VPC in your primary region (where your Schema Registry instance is deployed)
-* Optionally, a VM in that primary VPC for testing
+* An existing AWS VPC in your primary region (where your first Schema Registry instance shall be deployed)
+* A virtual machine in your primary VPC, where you run all commands, including terraform (!)
+** Running from within the VPC is necessary because the demo will disable public access to almost all resources including Schema Registry
+* An installation of the recent version of the `confluent` CLI (at least `v4.21.0`, check https://docs.confluent.io/confluent-cli/current/install.html for installation instructions)
 
 == Getting started
 
@@ -53,8 +55,16 @@ terraform output
 Let's set some environment variables for convenience:
 
 ```shell
-export KAFKA_BOOTSTRAP_SERVER=$(terraform output --raw cluster_bootstrap_server)
-export KAFKA_CLUSTER_REST=$(terraform output --raw cluster_rest_endpoint)
+export CCLOUD_ENV_ORIGINAL=$(terraform output -raw cc_primary_environment_id)
+export CCLOUD_ENV_OTHER=$(terraform output -raw cc_other_environment_id)
+export KAFKA_BOOTSTRAP_SERVER=$(terraform output --raw cluster_first_region_bootstrap_server)
+export KAFKA_CLUSTER_REST=$(terraform output --raw cluster_first_region_rest_endpoint)
+export SR_VPC1_ORIG_ENV=$(terraform output --raw schema_registry_private_endpoint_original_region_main_env)
+export SR_VPC2_ORIG_ENV=$(terraform output --raw schema_registry_private_endpoint_other_region_main_env)
+export SR_VPC1_OTHER_ENV=$(terraform output --raw schema_registry_private_endpoint_original_region_other_env)
+export SR_VPC2_OTHER_ENV=$(terraform output --raw schema_registry_private_endpoint_other_region_other_env)
+export SR_ID_ORIG_ENV=$(terraform output --raw schema_registry_original_env_id)
+export SR_ID_OTHER_ENV=$(terraform output --raw schema_registry_other_env_id)
 ```
 
 
@@ -80,35 +90,134 @@ kafka-console-consumer --bootstrap-server ${KAFKA_BOOTSTRAP_SERVER} --consumer.c
 
 Use the regional URLs for accessing Schema Registry. The instance will be located in your primary region, but access will be possible from the second region, too, mainly transparent for the client.
 
+Assuming that you are on a machine in the original region (`var.aws_region`), you should be able to access both Schema Registry instances (even though you will get a `401 - Unauthorized`):
+
+```shell
+curl $SR_VPC1_ORIG_ENV
+curl $SR_VPC1_OTHER_ENV
+```
+
+Obviously, if you are on a machine in the VPC in the other region, use the `...VPC2...` variables instead.
+
+
 === Schema Linking 
 
 Every Confluent Cloud environment has exactly one Schema Registry instance. Therefore, this demo deploys a second environment where a second Schema Registry instance is deployed in the other AWS region. This is triggered by spawning a basic cluster in that region in the environment.
+Please read the https://docs.confluent.io/cloud/current/sr/schema-linking.html#schema-linking[documentation] for details.
 
 It is now possible to use schema linking from the SR instance in the primary region to the instance in the other environment. This demonstrates the ability to do cross-region cross-environment schema linking.
 
-Set up schema linking like this:
+Set up schema linking like this. First, you need to login to the Confluent Cloud organization used in for setting up this demo with a user with OrganzationAdmin access permissions:
 
 ```shell
 confluent login
 ```
 
-Get the IDs of the regions and other data from terraform:
-
-```shell
-export CCLOUD_REGION_PRIMARY=$(terraform output -raw cc_primary_environment_id)
-export CCLOUD_REGION_OTHER=$(terraform output -raw cc_other_environment_id)
-```
-
 Use the environment:
 
 ```shell
-confluent env use ${CCLOUD_REGION_PRIMARY}
+confluent env use ${CCLOUD_ENV_ORIGINAL}
+```
+
+You should be able to show the cluster properties and the configuration details for the original Schema Registry instance:
+
+```shell
+confluent schema-registry cluster describe
+confluent schema-registry configuration describe
+```
+
+This demo has everything required for setting up schema linking pre-configured already. This includes a service account with access to the destination Schema Registry and a corresponding API key.
+
+Set up schema linking by running the following (you can customize the name of the exporter `demo-schema-exporter`):
+
+```shell
+confluent schema-registry exporter create demo-schema-exporter --subjects ":*:" --config generated/schema_linking_dest.conf
+```
+
+You can check the status of the exporter by running:
+
+```shell
+confluent schema-registry exporter status describe demo-schema-exporter
+```
+
+List the schemas in the destination Schema Registry (here we assume that there are no schemas in the original SR instance, so the destination should be empty, too):
+
+```shell
+confluent schema-registry schema list
+```
+
+Now, let's upload a new schema.
+export MEASUREMENT1_SCHEMA=$(jq -n --rawfile schema ../avro/measurement-v1.avsc '{schema: $schema}')
+```
+
+Use the generated username/password from `generated/client-admin.conf` and run:
+
+```shell
+export CREDS="<User>:<Password>"
+curl -u "$CREDS" -X POST -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+--data "$MEASUREMENT1_SCHEMA" \
+"${SR_VPC1_ORIG_ENV}/subjects/measurements-value/versions"
+```
+
+List the schemas in the original SR instance again. You should see the new schema now:
+
+```shell
+confluent schema-registry schema list
+```
+
+List the schemas in the other SR instance:
+
+```shell
+confluent schema-registry schema list --environment ${CCLOUD_ENV_OTHER}
+```
+
+If you used the default settings for configuring Schema Linking, you shouldn't see any schemas as they are not written to the "default" context of the destination Schema Registry. If this is the case and you want to list them anyway, use this command:
+
+```shell
+confluent schema-registry schema list --environment ${CCLOUD_ENV_OTHER} --subject-prefix ':*:'
+```
+
+You should see the same schema as in the original Schema Registry instance, but in a context named after the ID of the original SR instance.
+
+Let's assume you want to link your schema in the default context of the destination Schema Registry instead. Obviously, you need to make sure that only the exporter ever writes to the default context of that instanc. Otherwise you will see chaos.
+
+Delete the current exporter by running (we pause it first, just in case):
+
+```shell
+confluent schema-registry exporter pause demo-schema-exporter
+confluent schema-registry exporter delete demo-schema-exporter --force
+```
+
+Before we set up the exporter again, we need to delete all schemas in the destination (!!!) Schema Registry instance, in order to avoid conflicts.
+
+```shell
+confluent schema-registry schema delete --environment ${CCLOUD_ENV_OTHER} --subject ":.${SR_ID_ORIG_ENV}:measurements-value" --version all  --force
+confluent schema-registry schema delete --environment ${CCLOUD_ENV_OTHER} --subject ":.${SR_ID_ORIG_ENV}:measurements-value" --version all --permanent --force
+```
+
+Now set up Schema Linking to the default context of the destination Schema Registry:
+
+```shell
+confluent schema-registry exporter create demo-schema-exporter --subjects ":*:" --config generated/schema_linking_dest.conf --context-type none
+```
+
+Check the content again:
+
+```shell
+confluent schema-registry schema list --environment ${CCLOUD_ENV_OTHER} --subject-prefix ':*:'
 ```
 
 
 == Wrapping things up
 
-You can destroy all created resources including the cluster in Confluent Cloud by running the following command:
+Just in case, delete the schema exporter (if you have created it before):
+
+```shell
+confluent schema-registry exporter pause demo-schema-exporter
+confluent schema-registry exporter delete demo-schema-exporter --force
+```
+
+Then you can destroy all created resources including the cluster in Confluent Cloud by running the following command:
 
 ```shell
 terraform destroy

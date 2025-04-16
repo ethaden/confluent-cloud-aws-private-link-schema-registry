@@ -267,3 +267,7 @@ output "schema_registry_private_endpoint_other_region_other_env" {
   # We need to delay the execution of the above statement slightly by adding dependencies, otherwise the private regional endpoint
   # for the schema registry instance for the "aws.aws_region_other" might not be available yet (as it is still provisioning)
 }
+
+output "schema_registry_other_env_id" {
+    value = data.confluent_schema_registry_cluster.cc_env_schema_registry_other.id
+}
