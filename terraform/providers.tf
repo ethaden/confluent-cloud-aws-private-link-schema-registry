@@ -7,10 +7,16 @@ terraform {
     aws = {
         source = "hashicorp/aws"
     }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.27.0"
+    }
+
     restapi = {
       source = "Mastercard/restapi"
     }
   }
+  required_version = ">= 1.1.0"
 }
 
 provider "confluent" {
@@ -34,6 +40,12 @@ provider "aws" {
       tags = local.confluent_tags
     }
 }
+
+provider "azurerm" {
+  subscription_id = var.azure_subscription_id
+  features {}
+}
+
 
 # Using a generig REST API provider as long as there is no terraform integration for creating and managing certificate authorities
 provider "restapi" {

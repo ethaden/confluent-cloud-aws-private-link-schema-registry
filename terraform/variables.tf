@@ -183,3 +183,19 @@ variable "ccloud_cluster_generate_client_config_files" {
     default = false
     description = "Set to true if you want to generate client configs with the created API keys under subfolder \"generated/client-configs\""
 }
+
+variable "azure_subscription_id" {
+    type = string
+    description = "The subscription ID"
+}
+variable "azure_region" {
+    type = string
+    default = "westeurope"
+    description = "The Azure region"
+}
+
+# variable "azure_public_ssh_key" {
+#     type = string
+#     default = ""
+#     description = "The id of an existing public SSH key in the region"
+# }

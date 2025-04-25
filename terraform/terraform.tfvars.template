@@ -15,3 +15,5 @@ ccloud_cluster_consumer_group_prefixes = ["prefix1", "prefix2"]
 ccloud_cluster_consumer_read_topic_prefixes = ["prefix1", "prefix2"]
 ssh_key_name = "YOUR_SSH_KEY_NAME"
 ssh_key_public = "YOUR_PUBLIC_SSH_KEY"
+#azure_public_ssh_key = "YOUR_EXISTING_AZURE_SSH_KEY_WITHOUT_"
+azure_subscription_id = "YOUR_AZURE_SUBSCRIPTION_ID"
