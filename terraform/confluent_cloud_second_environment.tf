@@ -22,7 +22,8 @@ data "confluent_schema_registry_cluster" "cc_env_schema_registry_other" {
         confluent_kafka_cluster.cc_cluster_other_region_other_environment,
         confluent_kafka_cluster.cc_cluster_original_region_other_environment,
         confluent_private_link_attachment_connection.private_link_serverless_original_region_other_env,
-        confluent_private_link_attachment_connection.private_link_serverless_other_region_other_env
+        confluent_private_link_attachment_connection.private_link_serverless_other_region_other_env,
+        confluent_private_link_attachment_connection.cc_env_azure
     ]
 }
 

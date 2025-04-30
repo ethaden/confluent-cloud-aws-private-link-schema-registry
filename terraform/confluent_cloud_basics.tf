@@ -23,7 +23,9 @@ data "confluent_schema_registry_cluster" "cc_env_schema_registry" {
     confluent_kafka_cluster.cc_cluster,
     confluent_kafka_cluster.cc_cluster_other_region_same_environment,
     aws_route53_record.private_link_serverless_vpc_two_other_region_wildcard_record,
-    confluent_private_link_attachment_connection.private_link_serverless_other_region_original_env
+    confluent_private_link_attachment_connection.private_link_serverless_other_region_original_env,
+    confluent_private_link_attachment_connection.cc_env_azure,
+    confluent_kafka_cluster.cc_cluster_azure_region_same_environment
    ]
 }
 
